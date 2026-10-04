@@ -34,7 +34,7 @@ ManageSieve. Dovecot lo esegue **dopo** i filtri dell'utente. Lo script fa `file
   prima di ogni altra regola, a qualsiasi confidenza. Una cartella chiamata «Imbox» è una cartella come
   le altre e non riceve mai queste etichette.
 - **Spam** (la classe spam di Laya, etichetta `Junk`, configurabile con `smistamento_spam_labels`):
-  sotto la tabella c'è l'interruttore «Lo smistamento gestisce lo spam», acceso di default. Se è acceso
+  sotto il blocco «Quando arriva il digest» c'è l'interruttore «Lo smistamento gestisce lo spam», acceso di default. Se è acceso
   compare la riga fissa della cartella Spam speciale, senza «Segna come lette» né «Digest», con:
   - **Soglia Spam** (default 0,40) e **Soglia Cestino** (default 0,80), da 0,10 a 0,95 a passi di
     0,05; la soglia Spam deve essere più bassa della soglia Cestino, altrimenti il salvataggio si ferma
@@ -208,7 +208,7 @@ the user's own filters. Each rule does `fileinto` and `stop`.
   folder and no switch: the Sieve script `stop`s on these labels before any other rule, at any
   confidence. A folder named «Imbox» is an ordinary folder and never receives these labels.
 - **Spam** (Laya's spam class, label `Junk`, configurable via `smistamento_spam_labels`): below the
-  table, a «Sorting handles spam» switch, on by default. When on, a fixed row for the special Junk
+  digest time block, a «Sorting handles spam» switch, on by default. When on, a fixed row for the special Junk
   folder (no Mark as read, no Digest) offers two thresholds, **Spam threshold** (default 0.40) and
   **Trash threshold** (default 0.80), 0.10–0.95 in steps of 0.05, the Spam one lower than the Trash one
   (otherwise saving stops with «The Spam threshold must be lower than the Trash threshold.»; the general

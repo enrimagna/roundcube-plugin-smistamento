@@ -21,7 +21,7 @@ Il resto di SPEC-SMISTAMENTO resta valido. Modello e training: SPEC-LAYA.
 
 Come utente voglio decidere cosa succede allo spam che Laya riconosce, per non doverlo svuotare a mano.
 
-1. **Interruttore di pagina** sotto la tabella delle cartelle: «Lo smistamento gestisce lo spam», **acceso di default**. Inglese: «Sorting handles spam».
+1. **Interruttore di pagina** sotto il blocco «Quando arriva il digest» (ordine: cartelle, digest, Spam): «Lo smistamento gestisce lo spam», **acceso di default**. Inglese: «Sorting handles spam».
    - Acceso: sotto compare la riga **Spam** (la cartella Spam/Junk speciale di Roundcube) con Soglia Spam, Soglia Cestino e Dalla soglia Cestino in su.
    - Spento: la riga sparisce. Sieve non fa niente con l'etichetta spam: la mail segue le regole normali, cioè resta in Posta in arrivo (l'etichetta spam non è mai l'etichetta di una cartella). Soglie e azione salvate restano lì e tornano quando lo si riaccende.
 2. La riga Spam non ha «Segna come lette» né «Digest»: lo spam non entra mai nel digest. Le altre cartelle speciali (Bozze, Inviata, Cestino) restano escluse.

@@ -1,7 +1,7 @@
 # Installare Smistamento: istruzioni per un agente
 
 Questo file è un prompt completo. Copialo tutto e dallo all'agente (es. Grok Build) che lavora sul server.
-Repository: https://github.com/enrimagna/roundcube-plugin-smistamento (release `v1.1.0`, file `smistamento.zip`).
+Repository: https://github.com/enrimagna/roundcube-plugin-smistamento (release `v1.1.1`, file `smistamento.zip`).
 
 ---
 
@@ -115,7 +115,7 @@ Scrivi il percorso del backup nel rapporto.
 
 ```bash
 cd /tmp
-curl -fsSLO https://github.com/enrimagna/roundcube-plugin-smistamento/releases/download/v1.1.0/smistamento.zip
+curl -fsSLO https://github.com/enrimagna/roundcube-plugin-smistamento/releases/download/v1.1.1/smistamento.zip
 unzip -o smistamento.zip -d /tmp/smistamento-release      # crea /tmp/smistamento-release/smistamento/
 ls /tmp/smistamento-release/smistamento/smistamento.php
 ```

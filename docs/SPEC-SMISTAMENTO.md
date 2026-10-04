@@ -36,17 +36,19 @@ Correggere = spostare a mano: mettere una mail in una cartella attiva, o tirarla
   - «poche mail: servono almeno N»: icona ⚠, colore accento. Sotto la soglia **N** (segnaposto, da definire) la cartella resta attiva ma non riceve smistamenti. Lo stato si aggiorna da solo quando le mail arrivano a N.
 - Il conteggio «N mail» = numero di messaggi nella cartella usati come esempi (formato italiano: «1.032 mail»).
 
-**Blocco Spam** (US-SMI-SPAM, vedi SPEC-DELTA-LAYA), sotto la tabella:
-- interruttore «Lo smistamento gestisce lo spam» (default acceso);
-- se acceso, la riga fissa **Spam** (cartella speciale Spam/Junk): «Soglia Spam» [0,40 ▾] e «Soglia Cestino» [0,80 ▾] (0,10–0,95; la prima più bassa della seconda, altrimenti il salvataggio si ferma con «La soglia Spam deve essere più bassa della soglia Cestino.»), «Dalla soglia Cestino in su» (○ Sposta nel Cestino · ○ Elimina definitivamente: la mail viene cancellata subito e non si può recuperare.), più la nota; niente «Segna come lette» né «Digest»;
-- se spento, la riga è nascosta; soglie e azione restano salvate.
-- Mobile 390 px: card con nome, Soglia Spam, Soglia Cestino, poi le due scelte una sotto l'altra.
-
-**Blocco «Quando arriva il digest»** (unico, globale; niente orari per cartella):
+**Blocco «Quando arriva il digest»** (unico, globale; niente orari per cartella), subito sotto la tabella:
 - «Ora» [07:30 ▾]
 - «Settimanale: ogni» [lunedì ▾]
 - «Mensile: il» [1° del mese ▾] (valori 1°–28°, per evitare i mesi corti)
 - Nota: «Stessa periodicità = un'unica mail, con una sezione per cartella. Nessuna mail nel periodo = nessun digest.»
+
+Ordine della pagina: tabella delle cartelle, «Quando arriva il digest», Spam, «Salva». *(2026-10-04.)*
+
+**Blocco Spam** (US-SMI-SPAM, vedi SPEC-DELTA-LAYA), sotto il blocco «Quando arriva il digest», subito prima di «Salva»:
+- interruttore «Lo smistamento gestisce lo spam» (default acceso);
+- se acceso, la riga fissa **Spam** (cartella speciale Spam/Junk): «Soglia Spam» [0,40 ▾] e «Soglia Cestino» [0,80 ▾] (0,10–0,95; la prima più bassa della seconda, altrimenti il salvataggio si ferma con «La soglia Spam deve essere più bassa della soglia Cestino.»), «Dalla soglia Cestino in su» (○ Sposta nel Cestino · ○ Elimina definitivamente: la mail viene cancellata subito e non si può recuperare.), più la nota; niente «Segna come lette» né «Digest»;
+- se spento, la riga è nascosta; soglie e azione restano salvate.
+- Mobile 390 px: card con nome, Soglia Spam, Soglia Cestino, poi le due scelte una sotto l'altra.
 
 **Pulsante:** «SALVA» (come gli altri form delle Impostazioni). Conferma standard di Roundcube: «Salvato.»
 

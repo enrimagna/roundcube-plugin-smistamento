@@ -711,7 +711,6 @@ class smistamento extends rcube_plugin
         }
 
         $out .= html::div(['class' => 'smi-tbl'], $head . $rows);
-        $out .= $this->spam_block($p['spam']);
 
         // «Quando arriva il digest»
         $sel_time = new html_select(['name' => '_digest_time', 'id' => 'smi-time', 'class' => 'custom-select']);
@@ -738,6 +737,9 @@ class smistamento extends rcube_plugin
                 . html::label(['for' => 'smi-weekday'], $Q($this->gettext('digest_weekly'))) . $sel_week->show((string) $p['weekday'])
                 . html::label(['for' => 'smi-monthday'], $Q($this->gettext('digest_monthly'))) . $sel_month->show((string) $p['monthday']))
             . html::p(['class' => 'smi-note'], $Q($this->gettext('digest_note'))));
+
+        // the Spam section comes after «Quando arriva il digest»
+        $out .= $this->spam_block($p['spam']);
 
         $this->rc->output->add_gui_object('smistamentoform', 'smistamento-form');
         $this->rc->output->set_env('smistamento_highlight', (string) rcube_utils::get_input_value('_folder', rcube_utils::INPUT_GET, true));
