@@ -21,6 +21,8 @@ controllo fallisce, fermati e riferisci all'umano: non improvvisare correzioni s
 **Fuori dal tuo compito:** il servizio Laya che scrive gli header `X-Laya-Box` sulle mail in arrivo.
 Senza Laya il plugin funziona, ma nessuna mail viene spostata (resta tutto in Posta in arrivo). Non
 installare, configurare o simulare Laya in produzione.
+Anche il training settimanale di Laya (lunedì 03:30, sul server di posta) è lato Laya: tu installi solo
+l'export `classes` delle 03:00 (passo 7).
 
 ### Il server
 

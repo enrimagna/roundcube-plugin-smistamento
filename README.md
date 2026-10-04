@@ -68,7 +68,8 @@ ManageSieve. Dovecot lo esegue **dopo** i filtri dell'utente. Lo script fa `file
   le impostazioni in JSON (`# smistamento-settings: {...}`): cartelle, etichette accettate, digest,
   ora, lingua, fuso orario.
 - `smistamento-server.py classes` scrive un file per utente (`<indirizzo completo>.json`) con le classi
-  di quell'utente: è l'input per l'addestramento di Laya, che resta manuale e fuori da qui. La prima
+  di quell'utente: è l'input per l'addestramento di Laya, che gira ogni lunedì notte sul server di posta ed è
+  lato Laya, fuori da qui. La prima
   classe è sempre Posta in arrivo, fissa, anche senza cartelle attive:
   `{"mailbox": "INBOX", "path": "INBOX", "role": "inbox", "label": "Imbox", "accepts": ["Imbox"]}`.
   Seguono le cartelle attive con `"role": "folder"`. Così Laya ha sempre la classe «resta in Posta in
@@ -202,7 +203,7 @@ the user's own filters. Each rule does `fileinto` and `stop`.
 ### Strictly per user
 The settings live in the user's prefs and in the user's own Sieve script, with a JSON line that also
 carries the accepted labels, digest settings, language and timezone. The `classes` export writes one
-file per user (keyed by full address) for Laya's manual weekly training. Its first class is always the
+file per user (keyed by full address) for Laya's weekly training, which runs on the mail server on Monday night (Laya side). Its first class is always the
 fixed Inbox class (`"mailbox": "INBOX", "role": "inbox", "label": "Imbox"`), then the active folders
 (`"role": "folder"`), so Laya always learns «keep in the Inbox». Laya's head is per user (`768 → N`), its outputs are exactly these classes in this order, and
 `X-Laya-Box` carries one of their `label`s. The head file and the digest

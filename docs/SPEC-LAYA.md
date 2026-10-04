@@ -60,21 +60,44 @@ Sieve, dopo, `fileinto` sulla cartella e `stop`. `Imbox` non ha `fileinto`: rest
 
 ## Training
 
-Su una macchina di training separata, con GPU. Il primo giro è lo storico, circa 5 GB, dopo la migrazione dal server precedente: per ogni utente, le mail già presenti nelle sue cartelle attive sono gli esempi di quella classe, e le mail in INBOX quelli di `Imbox`.
+Due fasi, due macchine.
 
-Poi una volta a settimana, per utente:
+**Primo giro, una volta sola, sul PC di training con GPU.** Lo storico, circa 5 GB, dopo la migrazione dal server precedente: per ogni utente, le mail già presenti nelle sue cartelle attive sono gli esempi di quella classe, e le mail in INBOX quelli di `Imbox`. Il PC di training con GPU serve solo a questo.
 
-1. Lunedì alle 03:00 sul server di posta: `smistamento-server.py classes --all-users` scrive `/var/lib/smistamento/classes/<indirizzo>.json`.
-2. Si copiano sulla macchina di training il file `classes` e il log di consegna della settimana (`Message-ID` + proposta).
+**Poi ogni settimana, sul server di posta (dove gira Laya).** Niente copie verso il PC di training con GPU. L'encoder gira già lì, quindi niente ricodifica.
+
+### Alla consegna
+
+Laya salva per ogni mail, nell'archivio di quell'utente (es. `/var/lib/laya/emb/<indirizzo>.*`):
+
+- `Message-ID`;
+- label proposto e confidenza;
+- l'embedding a 768 dimensioni (float16 va bene, circa 1,5 KB a mail).
+
+Se a una mail manca l'embedding (Laya era giù, archivio perso), al training si ricodificano solo quelle: per circa 150 mail sono minuti di CPU.
+
+### Lunedì notte
+
+1. 03:00: `smistamento-server.py classes --all-users` scrive `/var/lib/smistamento/classes/<indirizzo>.json`.
+2. 03:30: il training di Laya, un utente alla volta, a bassa priorità (`nice`, `ionice`).
 3. Per ogni mail consegnata da almeno 7 giorni, `doveadm` cerca dove sta:
    - in una sola cartella, diversa dalla proposta: quella cartella è l'etichetta;
    - riportata in Posta in arrivo: etichetta `Imbox`;
    - in due cartelle, o mai toccata: esclusa;
    - in una cartella non attiva, o che non è nel file `classes`: esclusa.
-4. Si riallena solo la testa, `768 → N` con le classi del file, nel suo ordine. L'encoder no.
-5. Si copia `/laya/heads/<indirizzo>.joblib` sul server di posta. L'mtime del file è la data «Smistamento aggiornato» nel plugin.
+4. Si riallena la testa **da zero**, `768 → N` con le classi del file, nel suo ordine, su tutto lo storico più le correzioni nuove (non solo l'ultima settimana). L'encoder no.
+5. Controllo prima di installare: una parte degli esempi resta fuori come validazione. La testa nuova si installa solo se il suo errore su quella parte non è peggiore di quello della testa in uso. Altrimenti resta la vecchia e si scrive nel log.
+6. Installazione atomica: scrittura in un file temporaneo, poi rename su `/laya/heads/<indirizzo>.joblib`. La testa precedente resta come `<indirizzo>.joblib.prev`, per il rollback. L'mtime del file è la data «Smistamento aggiornato» nel plugin.
 
-**Da scrivere, lato Laya:** il log di consegna (una riga per mail: `Message-ID`, utente, label proposto, confidenza) e lo script dei 7 giorni con `doveadm`. Il plugin e `smistamento-server.py` non li fanno.
+### Costi
+
+| Cosa | Quanto |
+|---|---|
+| CPU | solo CPU; da pochi secondi a meno di un minuto per utente |
+| RAM | qualche centinaio di MB, per poco |
+| Disco | 75–150 MB ogni 50.000 mail; meno di 0,5 MB a settimana per 100–150 spostamenti |
+
+**Da scrivere, lato Laya:** l'archivio di consegna (`Message-ID`, label proposto, confidenza, embedding), lo script del lunedì (raccolta etichette con `doveadm`, riallenamento, controllo sulla validazione, installazione atomica con `.prev`) e la riga di cron delle 03:30. Il plugin e `smistamento-server.py` non li fanno: danno solo il file `classes` delle 03:00.
 
 ## Casi
 
