@@ -132,6 +132,8 @@ $config['smistamento_managesieve_port'] = 4190;
 $config['smistamento_managesieve_usetls'] = true;
 $config['smistamento_managesieve_conn_options'] = ['ssl' => ['verify_peer' => false, 'verify_peer_name' => false]]; // finché il cert è snakeoil
 $config['smistamento_head_file'] = '/laya/heads/%u.joblib'; // + volume read-only in compose.yaml
+$config['smistamento_llm_dir'] = '/var/lib/smistamento/llm';   // «Riassunto con AI»: volume rw, stesso percorso
+$config['smistamento_llm_keyfile'] = '/etc/smistamento/llm.key'; // volume read-only (vedi «Riassunto con AI»)
 
 // «Filtri» (plugin managesieve di Roundcube 1.7): porta e TLS stanno DENTRO managesieve_host.
 // managesieve_port e managesieve_usetls non esistono più e vengono ignorati: con quelle chiavi il
@@ -189,6 +191,70 @@ sieve_script smistamento {       # lo script gestito, nella stessa cartella, ese
   `--all-users` richiede uno userdb iterabile (passwd-file va bene).
 - Il digest si salva con `doveadm save` in INBOX e non passa da Sieve, quindi non viene mai smistato.
   Ha l'header `X-Dispaccio-Digest: day|week|month`.
+
+### Riassunto con AI («In breve» nel digest, facoltativo)
+Ogni utente può accendere, in Impostazioni › Smistamento › «Quando arriva il digest» › «Riassunto», un
+riassunto scritto da un modello via **OpenRouter** in cima al digest («In breve»). Spento di default.
+Campi: interruttore «Riassunto con AI», «Chiave API OpenRouter» (non si rivede dopo il salvataggio:
+«salvata · ••••1234», Sostituisci / Rimuovi, «Prova»), «Modello» (default `google/gemini-2.5-flash-lite`),
+«Prompt» (con `{mail}` e `{periodo}`, «Ripristina predefinito»). Con il riassunto attivo il testo delle
+mail del digest va a OpenRouter e al modello scelto: mittente, oggetto, data, cartella e al massimo 1.500
+caratteri di testo per mail (HTML tolto, citazioni e firme tagliate, niente allegati).
+
+**Dove stanno le impostazioni.** Il digest lo fa `smistamento-server.py` sull'host (root, `doveadm`), il
+plugin gira nel container di Roundcube: le preferenze di Roundcube e la sua `des_key` lo script non le
+vede. Quindi:
+- un file per utente, `<smistamento_llm_dir>/<utente>.json` (permessi 0600, scritto in modo atomico dal
+  plugin), in una directory dell'host montata nel container **allo stesso percorso**; dentro: acceso/spento,
+  modello, prompt (null = predefinito), chiave **cifrata**, ultime 4 cifre;
+- la chiave API è cifrata con un **file-chiave condiviso** (`/etc/smistamento/llm.key`, almeno 32
+  caratteri casuali), letto dal plugin (montato in sola lettura) e dallo script (root). Cifratura solo con
+  la libreria standard da entrambe le parti: flusso HMAC-SHA256 + HMAC (encrypt-then-MAC), legata
+  all'utente, quindi il valore di un utente non si apre sul file di un altro;
+- la chiave non finisce mai nello script Sieve, nella riga JSON delle impostazioni, nelle preferenze, nella
+  pagina (il campo non viene mai riempito), nei log o nei messaggi d'errore.
+
+Sull'host (Docker rootless: l'uid/gid di `www-data` del container corrisponde sull'host a un subuid; si
+trova con `docker exec <container> id www-data` e `/etc/subuid`, oppure creando un file dal container e
+guardando `stat` sull'host):
+```
+install -d -m 0700 -o <uid host di www-data> -g <gid host di www-data> /var/lib/smistamento/llm
+install -d -m 0750 -o root -g <gid host di www-data> /etc/smistamento
+openssl rand -base64 48 > /etc/smistamento/llm.key
+chown root:<gid host di www-data> /etc/smistamento/llm.key && chmod 0640 /etc/smistamento/llm.key
+```
+In `compose.yaml` del container Roundcube:
+```yaml
+    volumes:
+      - /var/lib/smistamento/llm:/var/lib/smistamento/llm
+      - /etc/smistamento/llm.key:/etc/smistamento/llm.key:ro
+```
+e in Roundcube `smistamento_llm_dir` / `smistamento_llm_keyfile` (vedi `config.inc.php.dist`). Lo script
+usa gli stessi percorsi di default (`--llm-dir`, `--llm-keyfile`). Senza file-chiave valido il blocco dice
+«Il riassunto con AI non è configurato su questo server.» Cambiare il file-chiave rende illeggibili le
+chiavi salvate: gli utenti le devono rimettere. Il container deve poter uscire verso `openrouter.ai:443`
+(per «Prova»), come l'host (per il digest).
+
+**Generazione.** Un digest = una chiamata (anche se unisce più cartelle), mai senza digest, mai con
+`--dry-run`. Timeout 30 s (`--llm-timeout`), 1 nuovo tentativo (`--llm-retries`) solo su timeout, rete,
+429 e 5xx. Qualsiasi errore → il digest parte senza «In breve» e su stderr c'è una riga
+`warning: <utente> <periodo>: summary skipped: invalid key (HTTP 401) (…); digest sent without it`, senza
+chiave né testo delle mail. Se va bene: `<utente> week: summary by <modello> from N mail(s): X in + Y out
+tokens, cost $Z`. Anche una risposta malformata, una connessione chiusa a metà o un errore imprevisto
+nel passo del riassunto lasciano partire il digest (nel log solo la classe dell'errore). Con
+`--all-users` l'errore di un utente non ferma gli altri: riga `error: <utente>: digest run failed (…)`,
+uscita 1 alla fine; un digest che non si riesce a salvare non viene segnato come inviato e si riprova al
+giro dopo; se il riassunto era già pronto, nel log c'è «summary ready, digest not saved» e il testo resta in
+`<state-dir>/<utente>.summary.json` (0600, senza chiave), così il nuovo tentativo lo riusa senza
+richiamare il modello (il file sparisce dopo il salvataggio). Con `--to-date` un digest non salvato non
+salta gli altri digest dello stesso utente. URL dell'API: `--llm-base` / `smistamento_openrouter_base`, altrimenti la variabile
+d'ambiente `SMISTAMENTO_OPENROUTER_BASE`, altrimenti `https://openrouter.ai/api/v1` (per le prove si punta
+a un mock).
+
+**Modello di default: `google/gemini-2.5-flash-lite`.** Il riassunto è quasi tutto input (fino a 40 mail ×
+1.500 caratteri, ~15–20k token, ~300 in uscita): $0,10/M in + $0,40/M out ≈ $0,002 per digest, contro
+$0,15/$0,15 di `mistralai/ministral-8b-2512` ≈ $0,003; contesto 1M contro 262K; nel bench sulle fatture è
+stato il più preciso e il più economico (~$0,0016 a chiamata); buon italiano.
 
 ---
 
@@ -250,6 +316,46 @@ state are per user too. Tested with two users.
 `lib/smistamento_labels.php` is the single place that maps labels to folders. It reads
 `smistamento_label_map` (explicit) and `smistamento_label_auto` (full path, unique leaf, both without
 spaces), compares case-insensitively, and is used for both the Sieve script and the «Sorted into» line.
+
+### AI summary («In breve» at the top of the digest, optional)
+Per user, off by default: Settings › Sorting › «When the digest arrives» › «Summary». Fields: «AI summary»
+switch, «OpenRouter API key» (never shown again after saving: «saved · ••••1234», Replace / Remove, «Test»),
+«Model» (default `google/gemini-2.5-flash-lite`), «Prompt» (placeholders `{mail}` and `{periodo}`,
+«Restore default»). With the summary on, the digest's mails go to OpenRouter and the chosen model: sender,
+subject, date, folder and at most 1,500 characters of cleaned text per mail (HTML stripped, quotes and
+signatures trimmed, no attachments).
+
+**Storage.** The digest is built by `smistamento-server.py` on the host (root, `doveadm`), the plugin runs in
+the Roundcube container, so Roundcube prefs and `des_key` are out of the script's reach. Instead:
+- one file per user, `<smistamento_llm_dir>/<user>.json` (mode 0600, written atomically by the plugin), in a
+  host directory mounted into the container **at the same path**: on/off, model, prompt (null = default),
+  the **encrypted** key and its last 4 characters;
+- the API key is encrypted with a **shared key file** (`/etc/smistamento/llm.key`, at least 32 random
+  characters), read by the plugin (mounted read-only, 0640 root:<www-data group>) and by the script (root).
+  Standard library only on both sides: HMAC-SHA256 keystream + HMAC tag (encrypt-then-MAC), bound to the
+  user;
+- the key never goes into the Sieve script, the settings JSON line, the prefs, the page, the logs or error
+  messages.
+
+Host setup, compose volumes and the Roundcube keys: see the Italian section above and `config.inc.php.dist`
+(`smistamento_llm_dir`, `smistamento_llm_keyfile`, `smistamento_openrouter_base`,
+`smistamento_llm_default_model`, `smistamento_llm_test_timeout`). Script options: `--llm-dir`, `--llm-keyfile`,
+`--llm-base` (else `$SMISTAMENTO_OPENROUTER_BASE`, else `https://openrouter.ai/api/v1`), `--llm-timeout 30`,
+`--llm-retries 1`, `--llm-max-mails 40`.
+
+**Generation.** One call per digest (merged folders included), never without a digest, never with
+`--dry-run`. 30 s timeout, 1 retry on timeout, network errors, 429 and 5xx. Any failure → the digest goes
+out without «In breve» and stderr gets a `summary skipped: <reason>` line with no key and no mail text. This
+includes malformed answers, connections closed mid-answer and any unexpected error in the summary step
+(only the error class is logged). With `--all-users` one user's failure never stops the others (exit status 1
+at the end); a digest that could not be saved is not marked as sent and is retried on the next run. If its
+summary was ready, the log says «summary ready, digest not saved» and the text is kept in
+`<state-dir>/<user>.summary.json` (0600, no key) so the retry reuses it without calling the model again. Token
+usage and cost are logged per digest when OpenRouter returns them.
+
+**Default model `google/gemini-2.5-flash-lite`:** the job is input-heavy (~15–20k tokens in, ~300 out):
+≈ $0.002 per digest vs ≈ $0.003 for `mistralai/ministral-8b-2512`, 1M vs 262K context, the most accurate and
+cheapest in our invoice bench, good Italian.
 
 ### Install / server setup
 Step-by-step instructions for a coding agent (Italian): [`INSTALL-AGENT.md`](INSTALL-AGENT.md).

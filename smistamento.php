@@ -32,6 +32,9 @@ class smistamento extends rcube_plugin
     private $spam_error = ''; // error label when the save was refused
     /** @var array|null folders + spam as the user submitted them (save refused) */
     private $form_override;
+    /** @var array|null «Riassunto» as the user submitted it (save refused; never the key) */
+    private $llm_override;
+    private $llm_error = '';
 
     public function init()
     {
@@ -50,6 +53,7 @@ class smistamento extends rcube_plugin
         require_once __DIR__ . '/lib/smistamento_core.php';
         require_once __DIR__ . '/lib/smistamento_labels.php';
         require_once __DIR__ . '/lib/smistamento_sieve.php';
+        require_once __DIR__ . '/lib/smistamento_llm.php';
 
         $this->add_hook('login_after', [$this, 'login_after']);
         $this->add_hook('storage_init', [$this, 'storage_init']);
@@ -57,10 +61,11 @@ class smistamento extends rcube_plugin
         $this->add_hook('folder_delete', [$this, 'folder_delete']);
 
         if ($this->rc->task == 'settings') {
-            $this->add_texts('localization/', ['tip_off', 'spam_err_order']);
+            $this->add_texts('localization/', ['tip_off', 'spam_err_order', 'llm_testing', 'llm_ok', 'llm_err_nokey', 'llm_key_removing']);
             $this->add_hook('settings_actions', [$this, 'settings_actions']);
             $this->register_action('plugin.smistamento', [$this, 'action_settings']);
             $this->register_action('plugin.smistamento-save', [$this, 'action_save']);
+            $this->register_action('plugin.smistamento-llmtest', [$this, 'action_llmtest']);
         } elseif ($this->rc->task == 'mail') {
             $this->add_texts('localization/', ['folder_menu', 'smistamento', 'move_to']);
             $this->add_hook('messages_list', [$this, 'messages_list']);
@@ -512,7 +517,16 @@ class smistamento extends rcube_plugin
             }
         }
 
-        if ($spam_error) {
+        $llm_cfg = $this->llm_cfg();
+        $llm_new = null;
+        if ($llm_cfg && $llm_cfg['ok']) {
+            [$llm_new, $this->llm_error] = $this->llm_from_post($llm_cfg);
+        }
+
+        if ($spam_error || $this->llm_error) {
+            if (!$spam_error) {
+                $spam_in = $spam_in + $p['spam']; // spam was fine: show what was submitted
+            }
             // nothing is saved: the page comes back with what the user chose, and the message
             $this->form_override = smistamento_core::normalize([
                 'folders' => $p['folders'],
@@ -521,13 +535,13 @@ class smistamento extends rcube_plugin
                 'monthday' => rcube_utils::get_input_value('_digest_monthday', rcube_utils::INPUT_POST),
             ], $p);
             $this->form_override['spam'] = [
-                'active' => true,
+                'active' => $spam_error ? true : !empty($spam_in['active']),
                 'threshold' => str_replace(',', '.', $spam_in['threshold']),
                 'trash_threshold' => str_replace(',', '.', $spam_in['trash_threshold']),
                 'action' => in_array($spam_in['action'], smistamento_core::SPAM_ACTIONS, true) ? $spam_in['action'] : 'trash',
             ];
             $this->spam_error = $spam_error;
-            $this->rc->output->show_message('smistamento.' . $spam_error, 'error');
+            $this->rc->output->show_message('smistamento.' . ($spam_error ?: $this->llm_error), 'error');
             $this->action_settings();
             return;
         }
@@ -540,14 +554,202 @@ class smistamento extends rcube_plugin
             'monthday' => rcube_utils::get_input_value('_digest_monthday', rcube_utils::INPUT_POST),
         ], $p);
 
-        if ($this->persist($p)) {
+        $llm_ok = $llm_new === null || smistamento_llm::save($llm_cfg['dir'], $this->llm_user(), $llm_new);
+        $this->llm_override = null;
+        if (!$llm_ok) {
+            rcube::raise_error(['code' => 600, 'message' => 'smistamento: cannot write the «Riassunto» settings file in smistamento_llm_dir'], true, false);
+        }
+
+        if ($this->persist($p) && $llm_ok) {
             $this->rc->output->show_message('successfullysaved', 'confirmation');
+        } elseif (!$llm_ok) {
+            $this->rc->output->show_message('smistamento.llm_err_save', 'error');
         } else {
             $this->sieve_error = true;
             $this->rc->output->show_message('smistamento.sieve_error', 'error');
         }
 
         $this->action_settings();
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // «Riassunto con AI» (US-SMI-DIGEST-LLM)
+    // -----------------------------------------------------------------------------------------
+
+    /**
+     * Where the per-user files live and the shared key: null when the feature is not configured
+     * (no «Riassunto» block). 'ok' is false when the directory or the key file is not usable.
+     */
+    private function llm_cfg()
+    {
+        $dir = $this->rc->config->get('smistamento_llm_dir');
+        if (!$dir) {
+            return null;
+        }
+        $master = smistamento_llm::master($this->rc->config->get('smistamento_llm_keyfile'));
+        $base = $this->rc->config->get('smistamento_openrouter_base') ?: (getenv('SMISTAMENTO_OPENROUTER_BASE') ?: smistamento_llm::DEFAULT_BASE);
+        return ['dir' => $dir, 'master' => $master, 'base' => $base, 'ok' => $master !== null && is_dir($dir) && is_writable($dir)];
+    }
+
+    private function llm_user()
+    {
+        return (string) $this->rc->get_user_name();
+    }
+
+    private function llm_default_model()
+    {
+        $m = (string) $this->rc->config->get('smistamento_llm_default_model', smistamento_llm::DEFAULT_MODEL);
+        return preg_match(smistamento_llm::MODEL_RE, $m) ? $m : smistamento_llm::DEFAULT_MODEL;
+    }
+
+    private function llm_load(array $cfg)
+    {
+        $s = smistamento_llm::load($cfg['dir'], $this->llm_user());
+        if (!is_file(smistamento_llm::file($cfg['dir'], $this->llm_user()))) {
+            $s['model'] = $this->llm_default_model();
+        }
+        return $s;
+    }
+
+    /** «Riassunto» sub-block of «Quando arriva il digest». */
+    private function llm_block()
+    {
+        $cfg = $this->llm_cfg();
+        if (!$cfg) {
+            return '';
+        }
+        $Q = static function ($t) { return rcube::Q($t); };
+        $lang = $_SESSION['language'] ?? 'it_IT';
+        $default_prompt = smistamento_llm::default_prompt($lang);
+        $this->rc->output->set_env('smistamento_llm_default_prompt', $default_prompt);
+
+        $title = html::div(['class' => 'smi-ai-title'], $Q($this->gettext('llm_title')));
+        if (!$cfg['ok']) {
+            return html::div(['class' => 'smi-ai'], $title . html::p(['class' => 'smi-note'], $Q($this->gettext('llm_unavailable'))));
+        }
+
+        $s = $this->llm_load($cfg);
+        if ($this->llm_override) {
+            $s = array_merge($s, $this->llm_override);
+        }
+        $prompt = $s['prompt'] ?? $default_prompt;
+
+        $switch = html::div(['class' => 'smi-ai-sw'],
+            html::label(['class' => 'smi-switch', 'for' => 'smi-llm-active'],
+                html::tag('input', ['type' => 'checkbox', 'name' => '_llm_active', 'value' => 1, 'id' => 'smi-llm-active',
+                    'checked' => $s['active'] ? 'checked' : null, 'aria-controls' => 'smi-llm-fields', 'aria-describedby' => 'smi-llm-privacy'])
+                . html::span(['class' => 'smi-sw', 'aria-hidden' => 'true'], '')
+                . html::span(['class' => 'smi-swl', 'data-on' => $this->gettext('yes_caps'), 'data-off' => $this->gettext('no_caps'), 'aria-hidden' => 'true'], '')
+                . html::span(['class' => 'smi-spam-swt'], $Q($this->gettext('llm_switch')))))
+            . html::p(['class' => 'smi-note smi-ai-privacy', 'id' => 'smi-llm-privacy'], $Q($this->gettext('llm_privacy')));
+
+        // key: never echoed. Saved = «salvata · ••••1234» + Sostituisci / Rimuovi
+        $has_key = !empty($s['key']) && !empty($s['key_last4']);
+        $input = html::tag('input', ['type' => 'password', 'name' => '_llm_key', 'id' => 'smi-llm-key', 'class' => 'form-control smi-ai-keyin',
+            'autocomplete' => 'new-password', 'spellcheck' => 'false', 'placeholder' => $this->gettext('llm_key_placeholder'),
+            'aria-describedby' => 'smi-llm-test-out']);
+        $key_ui = html::tag('input', ['type' => 'hidden', 'name' => '_llm_key_remove', 'id' => 'smi-llm-key-remove', 'value' => '']);
+        if ($has_key) {
+            $key_ui .= html::span(['class' => 'smi-ai-saved', 'id' => 'smi-llm-saved'],
+                html::span(['class' => 'smi-ai-savedtxt'], $Q($this->gettext(['name' => 'llm_key_saved', 'vars' => ['last4' => $s['key_last4']]])))
+                . html::tag('button', ['type' => 'button', 'class' => 'btn btn-secondary btn-sm smi-ai-btn', 'id' => 'smi-llm-replace'], $Q($this->gettext('llm_key_replace')))
+                . html::tag('button', ['type' => 'button', 'class' => 'btn btn-secondary btn-sm smi-ai-btn', 'id' => 'smi-llm-remove'], $Q($this->gettext('llm_key_remove'))))
+                . html::span(['class' => 'smi-ai-newkey smi-hide', 'id' => 'smi-llm-newkey'], $input
+                    . html::tag('button', ['type' => 'button', 'class' => 'btn btn-secondary btn-sm smi-ai-btn', 'id' => 'smi-llm-cancel'], $Q($this->gettext('llm_key_cancel'))))
+                . html::span(['class' => 'smi-ai-removing smi-hide', 'id' => 'smi-llm-removing'],
+                    $Q($this->gettext('llm_key_removing')) . ' '
+                    . html::tag('button', ['type' => 'button', 'class' => 'btn btn-link btn-sm smi-ai-undo', 'id' => 'smi-llm-undo'], $Q($this->gettext('llm_key_cancel'))));
+        } else {
+            $key_ui .= html::span(['class' => 'smi-ai-newkey', 'id' => 'smi-llm-newkey'], $input);
+        }
+        $key_ui .= html::tag('button', ['type' => 'button', 'class' => 'btn btn-secondary btn-sm smi-ai-btn smi-ai-test', 'id' => 'smi-llm-test'], $Q($this->gettext('llm_test')))
+            . html::span(['class' => 'smi-ai-out', 'id' => 'smi-llm-test-out', 'role' => 'status', 'aria-live' => 'polite'], '');
+
+        $missing = $s['active'] && !$has_key ? html::p(['class' => 'smi-note smi-ai-warn'], $Q($this->gettext('llm_key_missing'))) : '';
+
+        $fields = html::div(['class' => 'smi-ai-f'],
+                html::label(['class' => 'smi-ai-l', 'for' => 'smi-llm-key'], $Q($this->gettext('llm_key')))
+                . html::div(['class' => 'smi-ai-v smi-ai-key'], $key_ui) . $missing)
+            . html::div(['class' => 'smi-ai-f' . ($this->llm_error == 'llm_err_model' ? ' smi-invalid' : '')],
+                html::label(['class' => 'smi-ai-l', 'for' => 'smi-llm-model'], $Q($this->gettext('llm_model')))
+                . html::div(['class' => 'smi-ai-v'],
+                    html::tag('input', ['type' => 'text', 'name' => '_llm_model', 'id' => 'smi-llm-model', 'class' => 'form-control smi-ai-model',
+                        'value' => $s['model'], 'spellcheck' => 'false', 'autocomplete' => 'off', 'aria-describedby' => 'smi-llm-model-help',
+                        'aria-invalid' => $this->llm_error == 'llm_err_model' ? 'true' : null, 'placeholder' => smistamento_llm::DEFAULT_MODEL])
+                    . html::p(['class' => 'smi-note', 'id' => 'smi-llm-model-help'], $Q($this->gettext($this->llm_error == 'llm_err_model' ? 'llm_err_model' : 'llm_model_help')))))
+            . html::div(['class' => 'smi-ai-f'],
+                html::label(['class' => 'smi-ai-l', 'for' => 'smi-llm-prompt'], $Q($this->gettext('llm_prompt')))
+                . html::div(['class' => 'smi-ai-v'],
+                    html::tag('textarea', ['name' => '_llm_prompt', 'id' => 'smi-llm-prompt', 'class' => 'form-control smi-ai-prompt', 'rows' => 9,
+                        'maxlength' => smistamento_llm::PROMPT_MAX, 'spellcheck' => 'true', 'aria-describedby' => 'smi-llm-prompt-help'], rcube::Q($prompt, 'strict', false))
+                    . html::div(['class' => 'smi-ai-pfoot'],
+                        html::p(['class' => 'smi-note', 'id' => 'smi-llm-prompt-help'], $Q($this->gettext('llm_prompt_help')))
+                        . html::tag('button', ['type' => 'button', 'class' => 'btn btn-secondary btn-sm smi-ai-btn', 'id' => 'smi-llm-reset'], $Q($this->gettext('llm_reset'))))));
+
+        return html::div(['class' => 'smi-ai'], $title . $switch
+            . html::div(['class' => 'smi-ai-fields' . ($s['active'] ? '' : ' smi-hide'), 'id' => 'smi-llm-fields'], $fields));
+    }
+
+    /**
+     * Read and check the «Riassunto» part of the form. Returns [settings to save or null, error label].
+     * The typed key is encrypted right away; it is never kept in plain text past this call.
+     */
+    private function llm_from_post(array $cfg)
+    {
+        $cur = $this->llm_load($cfg);
+        $model = trim((string) rcube_utils::get_input_value('_llm_model', rcube_utils::INPUT_POST));
+        $prompt = str_replace("\r", '', (string) rcube_utils::get_input_value('_llm_prompt', rcube_utils::INPUT_POST, true));
+        $active = !empty(rcube_utils::get_input_value('_llm_active', rcube_utils::INPUT_POST));
+        $this->llm_override = ['active' => $active, 'model' => $model, 'prompt' => $prompt];
+
+        if ($model === '') {
+            $model = $this->llm_default_model();
+        }
+        if (!preg_match(smistamento_llm::MODEL_RE, $model) || strlen($model) > 120) {
+            return [null, 'llm_err_model'];
+        }
+        $prompt = mb_substr(trim($prompt), 0, smistamento_llm::PROMPT_MAX);
+        $default = trim(str_replace("\r", '', smistamento_llm::default_prompt($_SESSION['language'] ?? 'it_IT')));
+        if ($prompt === '' || $prompt === $default) {
+            $prompt = null; // follows the default (and its translation)
+        }
+
+        $new = ['active' => $active, 'model' => $model, 'prompt' => $prompt, 'key' => $cur['key'], 'key_last4' => $cur['key_last4']];
+        $typed = trim((string) rcube_utils::get_input_value('_llm_key', rcube_utils::INPUT_POST, true));
+        if ($typed !== '') {
+            $new['key'] = smistamento_llm::encrypt($cfg['master'], $this->llm_user(), $typed);
+            $new['key_last4'] = mb_substr($typed, -4);
+        } elseif (rcube_utils::get_input_value('_llm_key_remove', rcube_utils::INPUT_POST)) {
+            $new['key'] = $new['key_last4'] = null;
+        }
+        return [$new, ''];
+    }
+
+    /** «Prova»: one call with the typed key, or the saved one. Answers «Chiave valida» or the reason. */
+    public function action_llmtest()
+    {
+        $cfg = $this->llm_cfg();
+        $out = ['ok' => false, 'msg' => $this->gettext('llm_unavailable')];
+        if ($cfg && $cfg['ok']) {
+            $key = trim((string) rcube_utils::get_input_value('_key', rcube_utils::INPUT_POST, true));
+            if ($key === '') {
+                $saved = $this->llm_load($cfg)['key'];
+                $key = $saved ? (string) smistamento_llm::decrypt($cfg['master'], $this->llm_user(), $saved) : '';
+            }
+            $model = trim((string) rcube_utils::get_input_value('_model', rcube_utils::INPUT_POST)) ?: $this->llm_default_model();
+            if ($key === '') {
+                $out['msg'] = $this->gettext('llm_err_nokey');
+            } elseif (!preg_match(smistamento_llm::MODEL_RE, $model)) {
+                $out['msg'] = $this->gettext('llm_err_model');
+            } else {
+                $r = smistamento_llm::test_call($cfg['base'], $key, $model, (int) $this->rc->config->get('smistamento_llm_test_timeout', 15));
+                $out = $r['code'] == 'ok' ? ['ok' => true, 'msg' => $this->gettext('llm_ok')]
+                    : ['ok' => false, 'msg' => $this->gettext(['name' => 'llm_err_' . $r['code'], 'vars' => ['code' => $r['status']]])];
+            }
+            unset($key);
+        }
+        $this->rc->output->command('plugin.smistamento_llmtest', $out);
+        $this->rc->output->send();
     }
 
     /** «Smistamento aggiornato sabato 3 ottobre» / «Smistamento di base: …» / '' (not configured). */
@@ -736,7 +938,8 @@ class smistamento extends rcube_plugin
                 html::label(['for' => 'smi-time'], $Q($this->gettext('digest_time'))) . $sel_time->show($p['time'])
                 . html::label(['for' => 'smi-weekday'], $Q($this->gettext('digest_weekly'))) . $sel_week->show((string) $p['weekday'])
                 . html::label(['for' => 'smi-monthday'], $Q($this->gettext('digest_monthly'))) . $sel_month->show((string) $p['monthday']))
-            . html::p(['class' => 'smi-note'], $Q($this->gettext('digest_note'))));
+            . html::p(['class' => 'smi-note'], $Q($this->gettext('digest_note')))
+            . $this->llm_block());
 
         // the Spam section comes after «Quando arriva il digest»
         $out .= $this->spam_block($p['spam']);

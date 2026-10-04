@@ -1,7 +1,7 @@
 # Installare Smistamento: istruzioni per un agente
 
 Questo file è un prompt completo. Copialo tutto e dallo all'agente (es. Grok Build) che lavora sul server.
-Repository: https://github.com/enrimagna/roundcube-plugin-smistamento (release `v1.1.1`, file `smistamento.zip`).
+Repository: https://github.com/enrimagna/roundcube-plugin-smistamento (release `v1.2.0`, file `smistamento.zip`).
 
 ---
 
@@ -23,6 +23,12 @@ controllo fallisce, fermati e riferisci all'umano: non improvvisare correzioni s
   cartella Spam (l'utente la controlla, e serve ad allenare lo smistamento); da 0,80 in su → Cestino (o
   eliminazione, se l'utente sceglie «Elimina definitivamente»); senza confidenza → Spam. Lo spam segnato
   dal server (`X-Spam-Flag: YES`, MalwareBazaar) non passa da qui: resta come oggi.
+- Il **riassunto con AI** nel digest («In breve», via OpenRouter): **facoltativo e spento di default**.
+  Ogni utente lo accende da sé in Impostazioni › Smistamento › «Quando arriva il digest» › «Riassunto»,
+  con la **sua** chiave OpenRouter. Tu prepari solo il posto dove stanno le impostazioni: la cartella
+  `/var/lib/smistamento/llm` (un file per utente, montata in lettura/scrittura nel container) e il
+  file-chiave `/etc/smistamento/llm.key` (cifra le chiavi degli utenti, montato in sola lettura). Non
+  accendere il riassunto per nessuno e non inserire chiavi OpenRouter.
 
 **Fuori dal tuo compito:** il servizio Laya che scrive gli header `X-Laya-Box` sulle mail in arrivo.
 Senza Laya il plugin funziona, ma nessuna mail viene spostata (resta tutto in Posta in arrivo). Non
@@ -49,6 +55,7 @@ Ricavali dal server (passo 1) e scrivili nel rapporto. Se uno non si ricava con 
 | `<webmail-url>` | URL pubblico della webmail, con `/` finale | config / reverse proxy |
 | `<laya-heads-dir>` | cartella sull'host per i file `.joblib` di Laya (default `/laya/heads`) | chiedi all'umano se non esiste |
 | `<test-user>` | casella di prova autorizzata dall'umano per il test di consegna | **chiedi all'umano** |
+| `<www-data-uid>` / `<www-data-gid>` | uid/gid **sull'host** che corrispondono a `www-data` (33/33) del container | rootless: inizio del range in `/etc/subuid` / `/etc/subgid` dell'utente del container + 32 (es. `100000:65536` → `100032`); verifica al passo 4. Se il container usa un'altra mappatura (es. podman `--userns=keep-id`), chiedi |
 
 ### Regole di stop (valgono sempre)
 
@@ -63,7 +70,8 @@ Ricavali dal server (passo 1) e scrivili nel rapporto. Se uno non si ricava con 
 5. Prima di toccare un file di configurazione, fai il backup (passo 2). Se `doveconf -n` dà errore dopo
    una modifica, ripristina il backup e fermati.
 6. Non mettere password, chiavi o token in file, log o nel rapporto. Il plugin usa le credenziali della
-   sessione webmail dell'utente: non serve nessuna password nella config.
+   sessione webmail dell'utente: non serve nessuna password nella config. Il contenuto di
+   `/etc/smistamento/llm.key` non va mai stampato né copiato nel rapporto.
 7. Il test di consegna (passo 9) solo sulla `<test-user>` indicata dall'umano.
 
 ### Passo 1: controlli iniziali (solo lettura)
@@ -115,7 +123,7 @@ Scrivi il percorso del backup nel rapporto.
 
 ```bash
 cd /tmp
-curl -fsSLO https://github.com/enrimagna/roundcube-plugin-smistamento/releases/download/v1.1.1/smistamento.zip
+curl -fsSLO https://github.com/enrimagna/roundcube-plugin-smistamento/releases/download/v1.2.0/smistamento.zip
 unzip -o smistamento.zip -d /tmp/smistamento-release      # crea /tmp/smistamento-release/smistamento/
 ls /tmp/smistamento-release/smistamento/smistamento.php
 ```
@@ -145,13 +153,36 @@ sudo mkdir -p <laya-heads-dir>
 #   - <laya-heads-dir>:/laya/heads:ro
 ```
 
+Riassunto con AI (facoltativo per gli utenti, ma il posto va preparato): cartella delle impostazioni
+per utente, in lettura/scrittura per `www-data` del container, e file-chiave condiviso, in sola lettura:
+
+```bash
+sudo install -d -m 0755 /var/lib/smistamento
+sudo install -d -m 0700 -o <www-data-uid> -g <www-data-gid> /var/lib/smistamento/llm
+sudo install -d -m 0750 -o root -g <www-data-gid> /etc/smistamento
+sudo sh -c 'umask 027; openssl rand -base64 48 > /etc/smistamento/llm.key'
+sudo chown root:<www-data-gid> /etc/smistamento/llm.key && sudo chmod 0640 /etc/smistamento/llm.key
+sudo stat -c '%a %U:%G %n' /var/lib/smistamento/llm /etc/smistamento/llm.key   # 700 <www-data-uid>:… e 640 root:<www-data-gid>
+# nel compose del container Roundcube, sotto volumes (stesso percorso dentro e fuori):
+#   - /var/lib/smistamento/llm:/var/lib/smistamento/llm
+#   - /etc/smistamento/llm.key:/etc/smistamento/llm.key:ro
+```
+
+Il file-chiave si crea **una volta**: se lo rigeneri, le chiavi già salvate dagli utenti non si aprono più
+e vanno reinserite. Non stamparne il contenuto.
+
 Se hai cambiato il compose, ricrea il container **una volta** (avvisa l'umano: la webmail si ferma per
 pochi secondi). Poi controlla:
 
 ```bash
 <runtime> exec <rc-container> ls <rc-plugins-in-container>/smistamento/smistamento.php /laya/heads
 <runtime> exec -i <rc-container> php -l < /opt/roundcube/plugins/smistamento/smistamento.php
+# riassunto con AI: www-data del container scrive nella cartella e legge il file-chiave
+<runtime> exec -u 33 <rc-container> sh -c 'touch /var/lib/smistamento/llm/.probe && rm /var/lib/smistamento/llm/.probe && test -r /etc/smistamento/llm.key && ! test -w /etc/smistamento/llm.key && echo LLM-MOUNT OK'
 ```
+
+Se non stampa `LLM-MOUNT OK`, i proprietari non corrispondono a `www-data` del container: ricontrolla
+`<www-data-uid>` / `<www-data-gid>` (non allargare i permessi a 0777/0644) e, se non è chiaro, chiedi.
 
 ### Passo 5: configurazione Roundcube
 
@@ -185,6 +216,12 @@ $config['smistamento_head_file'] = '/laya/heads/%u.joblib';         // %u = indi
 // $config['smistamento_spam_default'] = ['active' => true, 'threshold' => '0.40', 'trash_threshold' => '0.80', 'action' => 'trash'];
 //   active = interruttore; threshold = Soglia Spam; trash_threshold = Soglia Cestino (deve essere più alta);
 //   action = 'trash' (Sposta nel Cestino) | 'discard' (Elimina definitivamente). Valori da '0.10' a '0.95'.
+
+// Riassunto con AI nel digest (facoltativo, spento di default per ogni utente). Senza queste due righe
+// il blocco «Riassunto» non compare. Nessuna chiave OpenRouter qui: ogni utente mette la sua.
+$config['smistamento_llm_dir'] = '/var/lib/smistamento/llm';        // montata rw, stesso percorso
+$config['smistamento_llm_keyfile'] = '/etc/smistamento/llm.key';    // montato :ro
+// $config['smistamento_llm_default_model'] = 'google/gemini-2.5-flash-lite';   // default del plugin
 ```
 
 Le altre chiavi (`smistamento_label_map`, orari del digest, …) sono in `config.inc.php.dist` del plugin,
@@ -269,9 +306,16 @@ Raggiungibilità dal container (deve rispondere il banner ManageSieve):
 ```bash
 sudo install -m 0755 /tmp/smistamento-release/smistamento/server/smistamento-server.py /usr/local/sbin/smistamento-server.py
 sudo install -m 0644 /tmp/smistamento-release/smistamento/server/texts.json /usr/local/sbin/texts.json
-sudo install -d -m 0750 /var/lib/smistamento /var/lib/smistamento/digest /var/lib/smistamento/classes
+sudo install -d -m 0750 /var/lib/smistamento/digest /var/lib/smistamento/classes
 sudo /usr/local/sbin/smistamento-server.py show --all-users | head -n 20     # non deve dare errori
 ```
+
+Lo script legge le impostazioni del riassunto da `/var/lib/smistamento/llm` e il file-chiave da
+`/etc/smistamento/llm.key` (i suoi default, `--llm-dir` / `--llm-keyfile`). Chiama OpenRouter solo per gli
+utenti che hanno acceso il riassunto e salvato una chiave; se la chiamata fallisce, il digest parte lo
+stesso senza «In breve». Host e container devono poter uscire verso `openrouter.ai:443`; se il firewall in
+uscita lo blocca, dillo all'umano (non aprirlo tu). In `/var/lib/smistamento/digest` può comparire
+`<utente>.summary.json` (0600): è un riassunto tenuto da parte per un digest non salvato, senza chiavi.
 
 `/etc/cron.d/smistamento`:
 
@@ -300,6 +344,20 @@ Con un utente reale (chiedi all'umano di fare il login, o usa `<test-user>`):
    Spam con «Soglia Spam» 0,40, «Soglia Cestino» 0,80 e «Sposta nel Cestino» scelto. Prova a mettere la
    Soglia Spam uguale o più alta della Soglia Cestino e Salva: la pagina non salva e dice «La soglia Spam
    deve essere più bassa della soglia Cestino.». Rimetti 0,40 / 0,80 e Salva.
+6. **Riassunto con AI**, stessa pagina, dentro «Quando arriva il digest»: c'è il sotto-blocco «Riassunto»
+   con l'interruttore «Riassunto con AI» **spento** e, sotto, la riga «Con il riassunto attivo, il testo
+   delle mail del digest viene inviato a OpenRouter e al modello scelto.». **Non** deve comparire «Il
+   riassunto con AI non è configurato su questo server.» (se compare: mount o permessi del passo 4, o le
+   due chiavi del passo 5). Non accenderlo e non salvare chiavi: lo fa ogni utente, se vuole.
+   Sul server, per tutti gli utenti, nessun file acceso:
+   ```bash
+   sudo sh -c 'grep -l "\"active\": true" /var/lib/smistamento/llm/*.json 2>/dev/null || echo "nessun riassunto acceso"'
+   sudo /usr/local/sbin/smistamento-server.py digest --user <test-user> --to-date --dry-run --base-url <webmail-url>   # nessuna chiamata a OpenRouter (dry-run non la fa mai)
+   ```
+   Facoltativo, solo se l'umano te lo chiede e fa lui il login: con la sua chiave, «Prova» accanto al campo
+   deve rispondere «Chiave valida»; dopo Salva la pagina mostra «salvata · ••••» + le ultime 4 cifre, e la
+   chiave non compare in `sudo doveadm sieve get -u <utente> smistamento` né in
+   `/var/lib/smistamento/llm/<utente>.json` (lì c'è solo un valore cifrato `smi1.…`).
 
 ### Passo 9: test di consegna (solo `<test-user>`)
 
@@ -357,6 +415,9 @@ cat /tmp/smistamento-classes-test/*.json     # prima classe: INBOX, "role": "inb
 sudo doveconf -n >/dev/null && sudo doveadm reload
 # Cron:
 sudo mv /etc/cron.d/smistamento /root/backup-smistamento-<TS>/
+# Riassunto con AI: togli le due chiavi smistamento_llm_* (il blocco «Riassunto» sparisce) e i due volumi
+# dal compose. Lascia /var/lib/smistamento/llm e /etc/smistamento/llm.key: senza, le chiavi salvate
+# dagli utenti non si recuperano più. Spostali nel backup solo se l'umano lo chiede.
 ```
 
 Gli script `smistamento` già scritti nelle home degli utenti **restano**: senza il blocco
@@ -365,5 +426,7 @@ Gli script `smistamento` già scritti nelle home degli utenti **restano**: senza
 ### Rapporto finale per l'umano
 
 Scrivi: valori dei segnaposto usati, percorso del backup, file modificati/creati, diff di `doveconf -n`,
-output di `ss -ltnp | grep 4190`, esito dei passi 8 e 9 (spam compreso), eventuali domande aperte. Ricorda che Laya
+output di `ss -ltnp | grep 4190`, esito dei passi 8 e 9 (spam e riassunto con AI compresi: `LLM-MOUNT OK`,
+permessi di `/var/lib/smistamento/llm` e `/etc/smistamento/llm.key`, blocco «Riassunto» spento, mai il
+contenuto del file-chiave), eventuali domande aperte. Ricorda che Laya
 (scrittura degli header `X-Laya-Box`) non è installata: finché non c'è, le mail restano in Posta in arrivo.

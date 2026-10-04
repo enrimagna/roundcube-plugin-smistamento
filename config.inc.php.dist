@@ -92,6 +92,36 @@ $config['smistamento_digest_weekday'] = 1;   // 1 = Monday ... 7 = Sunday
 $config['smistamento_digest_monthday'] = 1;  // 1..28
 
 // ---------------------------------------------------------------------------------------------
+// «Riassunto con AI» in the digest (OpenRouter)
+// ---------------------------------------------------------------------------------------------
+//
+// Per user, in Impostazioni › Smistamento › «Quando arriva il digest» › «Riassunto»: switch (off by default),
+// OpenRouter API key, model, prompt. The digest is built by server/smistamento-server.py on the mail host,
+// so the settings live in a directory BOTH can reach: one file per user (<dir>/<user>.json, mode 0600),
+// written by Roundcube, read by the server script (root). The API key in it is encrypted with a key file
+// shared by both (never in the Sieve script, the settings JSON line, the prefs, the page or a log).
+//
+// Mail host setup (see README, «Riassunto con AI»):
+//   install -d -m 0700 -o <uid of www-data in the container> /var/lib/smistamento/llm
+//   install -d -m 0750 /etc/smistamento && openssl rand -base64 48 > /etc/smistamento/llm.key
+//   chown root:<gid of www-data in the container> /etc/smistamento/llm.key && chmod 0640 /etc/smistamento/llm.key
+//   container volumes:  /var/lib/smistamento/llm:/var/lib/smistamento/llm  (rw)
+//                       /etc/smistamento/llm.key:/etc/smistamento/llm.key:ro
+// Same paths inside and outside the container, so the defaults of smistamento-server.py fit.
+
+// Directory of the per-user files, as seen by Roundcube. null = feature off (no «Riassunto» block).
+$config['smistamento_llm_dir'] = null;
+// Key file shared with the server script (at least 32 characters, e.g. openssl rand -base64 48).
+$config['smistamento_llm_keyfile'] = '/etc/smistamento/llm.key';
+// OpenRouter API base for «Prova». null = $SMISTAMENTO_OPENROUTER_BASE, else https://openrouter.ai/api/v1.
+// The server script takes --llm-base or the same environment variable.
+$config['smistamento_openrouter_base'] = null;
+// Model offered to users who never saved the block (any OpenRouter id).
+$config['smistamento_llm_default_model'] = 'google/gemini-2.5-flash-lite';
+// Seconds «Prova» waits for OpenRouter.
+$config['smistamento_llm_test_timeout'] = 15;
+
+// ---------------------------------------------------------------------------------------------
 // «Smistamento aggiornato …» line
 // ---------------------------------------------------------------------------------------------
 

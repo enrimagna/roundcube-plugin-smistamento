@@ -116,6 +116,41 @@ window.rcmail && rcmail.addEventListener('init', function () {
             spam_check(false);
         });
 
+        // «Riassunto con AI»: off = fields hidden (values kept). The key is never shown again after saving.
+        $('#smi-llm-active', form).on('change', function () {
+            $('#smi-llm-fields').toggleClass('smi-hide', !this.checked);
+        });
+        var key_state = function (state) { // saved | new | removing
+            $('#smi-llm-saved').toggleClass('smi-hide', state != 'saved');
+            $('#smi-llm-newkey').toggleClass('smi-hide', state != 'new');
+            $('#smi-llm-removing').toggleClass('smi-hide', state != 'removing');
+            $('#smi-llm-key-remove').val(state == 'removing' ? '1' : '');
+            if (state != 'new') {
+                $('#smi-llm-key').val('');
+            }
+            $('#smi-llm-test').toggleClass('smi-hide', state == 'removing');
+            $('#smi-llm-test-out').text('').removeClass('ok err');
+        };
+        $('#smi-llm-replace', form).on('click', function () { key_state('new'); $('#smi-llm-key').focus(); });
+        $('#smi-llm-cancel', form).on('click', function () { key_state('saved'); $('#smi-llm-replace').focus(); });
+        $('#smi-llm-remove', form).on('click', function () { key_state('removing'); $('#smi-llm-undo').focus(); });
+        $('#smi-llm-undo', form).on('click', function () { key_state('saved'); $('#smi-llm-remove').focus(); });
+        $('#smi-llm-reset', form).on('click', function () {
+            $('#smi-llm-prompt').val(rcmail.env.smistamento_llm_default_prompt || '').focus();
+        });
+        // «Prova»: the typed key, or the saved one when the field is empty
+        $('#smi-llm-test', form).on('click', function () {
+            var btn = $(this).prop('disabled', true);
+            $('#smi-llm-test-out').text(rcmail.get_label('smistamento.llm_testing')).removeClass('ok err');
+            rcmail.http_post('plugin.smistamento-llmtest', {_key: $('#smi-llm-key').val() || '', _model: $('#smi-llm-model').val() || ''},
+                rcmail.set_busy(true, 'loading'));
+            setTimeout(function () { btn.prop('disabled', false); }, 1500);
+        });
+        rcmail.addEventListener('plugin.smistamento_llmtest', function (r) {
+            $('#smi-llm-test').prop('disabled', false);
+            $('#smi-llm-test-out').text(r.msg).toggleClass('ok', !!r.ok).toggleClass('err', !r.ok);
+        });
+
         // opened from the folder menu: scroll to the folder row and flash it
         if (rcmail.env.smistamento_highlight) {
             $('.smi-tr', form).each(function () {

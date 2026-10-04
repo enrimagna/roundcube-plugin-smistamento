@@ -236,6 +236,36 @@ html:not(.skin-dispaccio) #mailboxlist li.mailbox > a > .smistamento-mark { disp
 .smi-flds select.custom-select { width: auto; min-width: 7em; margin-right: 16px; }
 .smi-note { font-size: 12px; color: var(--smi-mut); line-height: 1.6; margin: 0; }
 
+/* «Riassunto» inside «Quando arriva il digest» (AI summary) */
+.smi-ai { margin-top: 14px; border-top: 1px dashed var(--smi-line); padding-top: 10px; }
+.smi-ai .smi-hide { display: none !important; }
+.smi-ai-title { text-transform: uppercase; letter-spacing: .14em; font-weight: 700; font-size: 10px; color: var(--smi-mut); margin-bottom: 6px; }
+.smi-ai-sw { padding: 2px 0 6px; }
+.smi-ai-sw .smi-spam-swt { margin-left: 12px; font-size: 13px; font-weight: 600; color: var(--smi-ink); }
+.smi-ai-privacy { margin: 0 0 4px; }
+.smi-ai-fields { margin-top: 8px; display: grid; gap: 10px; }
+.smi-ai-f { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 4px 14px; align-items: start; }
+.smi-ai-l { margin: 6px 0 0; font-size: 12.5px; font-weight: 600; color: var(--smi-ink); }
+.smi-ai-v { min-width: 0; }
+.smi-ai-key, .smi-ai-saved, .smi-ai-newkey { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.smi-ai-savedtxt { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; color: var(--smi-ink); margin-right: 4px; }
+.smi-ai-keyin { width: 22em; max-width: 100%; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.smi-ai-model { width: 22em; max-width: 100%; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.smi-ai-prompt { width: 100%; max-width: 46em; font-size: 12.5px; line-height: 1.5; resize: vertical; }
+.smi-ai .form-control { background: var(--smi-bg); color: var(--smi-ink); border-color: var(--smi-line); }
+.smi-ai .smi-note { margin-top: 4px; }
+.smi-ai-pfoot { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 6px 12px; max-width: 46em; }
+.smi-ai-btn { font-size: 11.5px; padding: 3px 10px; }
+.smi-ai-undo { font-size: 12px; padding: 0 4px; color: var(--smi-acc); }
+.smi-ai-removing { font-size: 12.5px; color: var(--smi-acc); }
+.smi-ai-out { font-size: 12.5px; font-weight: 600; }
+.smi-ai-out.ok { color: var(--smi-ink); }
+.smi-ai-out.ok:before { content: "✓ "; color: var(--smi-acc); }
+.smi-ai-out.err { color: var(--smi-acc); }
+.smi-ai-warn { color: var(--smi-acc); grid-column: 2; }
+.smi-ai-f.smi-invalid .smi-ai-model { border-color: var(--smi-acc); box-shadow: 0 0 0 1px var(--smi-acc); }
+.smi-ai-f.smi-invalid #smi-llm-model-help { color: var(--smi-acc); font-weight: 600; }
+
 /* «Lo smistamento gestisce lo spam» + the fixed Spam row */
 .smi-spam-block { margin-top: 18px; }
 .smi-spam-sw { padding: 10px 0; border-top: 1px solid var(--smi-ink); }
@@ -293,6 +323,15 @@ html:not(.skin-dispaccio) #mailboxlist li.mailbox > a > .smistamento-mark { disp
     .smi-thr-m { display: inline; }
     .smi-flds { flex-direction: column; align-items: flex-start; }
     .smi-flds select.custom-select { margin-right: 0; }
+    .smi-ai-fields { border: 1px solid var(--smi-line); background: var(--smi-bg); padding: 10px 12px; }
+    .smi-ai-f { grid-template-columns: 1fr; }
+    .smi-ai-l { margin-top: 0; }
+    .smi-ai-warn { grid-column: 1; }
+    .smi-ai-keyin, .smi-ai-model { width: 100%; }
+    /* «salvata · ••••1234» on its own line, then Sostituisci / Rimuovi / Prova on one row (wrapping if needed) */
+    .smi-ai-saved { display: contents; }
+    .smi-ai-savedtxt { flex: 0 0 100%; }
+    .smi-ai-out { flex: 0 0 100%; }
     .smistamento-settings .smi-title { font-size: 26px; }
 }
 
