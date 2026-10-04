@@ -1,0 +1,300 @@
+/* Smistamento: works with Elastic and with child skins. Uses Il Dispaccio's --d-* palette when present. */
+
+:root {
+    --smi-bg: var(--d-bg, #fff);
+    --smi-bg2: var(--d-bg2, #f4f4f4);
+    --smi-ink: var(--d-ink, #2c363a);
+    --smi-mut: var(--d-mut, #6a7478);
+    --smi-line: var(--d-line, #ddd);
+    --smi-acc: var(--d-acc, #00acff);
+    --smi-hi: var(--d-hi, #37beff);
+    --smi-hiink: var(--d-hiink, #fff);
+}
+html.dark-mode {
+    --smi-bg: var(--d-bg, #21292c);
+    --smi-bg2: var(--d-bg2, #2c363a);
+    --smi-ink: var(--d-ink, #c5d1d3);
+    --smi-mut: var(--d-mut, #8ba3a7);
+    --smi-line: var(--d-line, #3a474b);
+    --smi-acc: var(--d-acc, #37beff);
+    --smi-hi: var(--d-hi, #37beff);
+    --smi-hiink: var(--d-hiink, #21292c);
+}
+
+/* ↻ (Font Awesome "sync") and other icons from Elastic's icon font */
+.smistamento-mark:before, .smi-mark:before, .smistamento-icon:before {
+    content: "\f021";
+    font-family: Icons;
+    font-weight: 900;
+    font-style: normal;
+}
+
+/* ---------------------------------------------------------------- folder list */
+#mailboxlist li.mailbox > a > .smistamento-mark {
+    order: 0;
+    flex: 0 0 auto;
+    font-size: 9px;
+    line-height: 1;
+    color: var(--smi-acc);
+    margin-left: 6px;
+    text-transform: none;
+}
+#mailboxlist li.mailbox.selected > a > .smistamento-mark { color: var(--smi-hiink); }
+/* stock Elastic: the link is not a flex box */
+html:not(.skin-dispaccio) #mailboxlist li.mailbox > a > .smistamento-mark { display: inline-block; vertical-align: 1px; }
+
+
+/* folder menu entry */
+#mailboxoptions-menu a.smistamento:before { content: "\f021"; }
+
+/* ---------------------------------------------------------------- message list: digest */
+#messagelist tr.smistamento-digest span.fromto:before,
+#messagelist tr.smistamento-digest td.fromto:before {
+    content: "\f1ea";
+    font-family: Icons;
+    font-weight: 900;
+    color: var(--smi-acc);
+    margin-right: 6px;
+    font-size: 11px;
+}
+#messagelist tr.smistamento-digest.selected span.fromto:before,
+#messagelist tr.smistamento-digest.selected td.fromto:before { color: var(--smi-hiink); }
+
+/* ---------------------------------------------------------------- «Smistata in …» line */
+.smistamento-sorted {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    color: var(--smi-mut);
+    padding: 6px 0 7px;
+    border-top: 1px solid var(--smi-line);
+    clear: both;
+}
+.smistamento-sorted .smistamento-icon { font-size: 9px; color: var(--smi-acc); }
+.smistamento-sorted b { color: var(--smi-ink); font-weight: 600; }
+.smistamento-sorted a.smistamento-change {
+    color: var(--smi-acc);
+    text-decoration: none;
+    border-bottom: 1px solid var(--smi-acc);
+}
+.smistamento-sorted a.smistamento-change:hover, .smistamento-sorted a.smistamento-change:focus { border-bottom-width: 2px; }
+
+/* ---------------------------------------------------------------- settings page */
+.smistamento-settings { color: var(--smi-ink); max-width: 1000px; }
+.smistamento-content { padding-top: 16px; }
+.smistamento-settings .smi-kicker {
+    color: var(--smi-acc);
+    text-transform: uppercase;
+    letter-spacing: .16em;
+    font-weight: 700;
+    font-size: 10.5px;
+}
+.smistamento-settings .smi-title {
+    font-family: Fraunces, Georgia, serif;
+    font-weight: 800;
+    font-size: 31px;
+    line-height: 1.1;
+    letter-spacing: -.02em;
+    font-variation-settings: "opsz" 144;
+    margin: 4px 0 6px;
+    color: var(--smi-ink);
+}
+.smistamento-settings .smi-intro { font-size: 13px; line-height: 1.6; padding-bottom: 12px; margin: 0; }
+.smistamento-settings .smi-intro-m { color: var(--smi-mut); }
+.smistamento-settings .smi-empty { font-size: 13px; color: var(--smi-mut); margin: 4px 0 10px; }
+.smistamento-settings .smi-banner {
+    border: 1px solid var(--smi-acc);
+    color: var(--smi-acc);
+    padding: 8px 12px;
+    margin: 0 0 12px;
+    font-size: 12.5px;
+    font-weight: 600;
+}
+
+.smi-tbl { border-top: 4px double var(--smi-ink); }
+.smi-th, .smi-tr {
+    display: grid;
+    grid-template-columns: minmax(168px, 1fr) 92px 178px 300px;
+    align-items: center;
+    column-gap: 8px;
+}
+.smi-th {
+    height: 32px;
+    border-bottom: 1px solid var(--smi-ink);
+    color: var(--smi-mut);
+    text-transform: uppercase;
+    letter-spacing: .16em;
+    font-weight: 700;
+    font-size: 10.5px;
+    white-space: nowrap;
+}
+.smi-tr {
+    min-height: 46px;
+    border-bottom: 1px dashed var(--smi-line);
+    font-size: 13px;
+    transition: background-color .15s;
+}
+.smi-tr.smi-flash { background-color: var(--smi-bg2); outline: 2px solid var(--smi-acc); outline-offset: -2px; }
+
+.smi-nm { display: flex; align-items: center; gap: 8px; text-transform: uppercase; font-weight: 700; font-size: 12.5px; min-width: 0; }
+.smi-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.smi-nm .smi-mark { font-size: 9px; color: var(--smi-acc); }
+.smi-tr.off .smi-nm { color: var(--smi-mut); font-weight: 500; }
+.smi-tr.off .smi-mark { display: none; }
+.smi-tr.off .smi-dis { opacity: .42; filter: grayscale(1); pointer-events: none; }
+
+/* switch «SÌ / NO» */
+.smi-switch { display: inline-flex; align-items: center; margin: 0; cursor: pointer; position: relative; }
+.smi-switch input, .smi-check input, .smi-seg input {
+    position: absolute;
+    opacity: 0;
+    width: 1px;
+    height: 1px;
+    margin: 0;
+}
+.smi-sw {
+    width: 40px;
+    height: 20px;
+    border: 1px solid var(--smi-ink);
+    position: relative;
+    display: inline-block;
+    background: var(--smi-bg);
+}
+.smi-sw:after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    background: var(--smi-mut);
+}
+.smi-switch input:checked + .smi-sw { background: var(--smi-acc); border-color: var(--smi-acc); }
+.smi-switch input:checked + .smi-sw:after { left: 22px; background: var(--smi-bg); }
+.smi-switch input:focus-visible + .smi-sw { outline: 2px solid var(--smi-acc); outline-offset: 2px; }
+.smi-swl { font-size: 10.5px; letter-spacing: .12em; font-weight: 700; margin-left: 8px; min-width: 2em; }
+.smi-swl:after { content: attr(data-off); }
+.smi-switch input:checked ~ .smi-swl:after { content: attr(data-on); }
+
+/* checkbox «sì / no» */
+.smi-check { display: inline-flex; align-items: center; margin: 0; cursor: pointer; position: relative; }
+.smi-cb {
+    width: 16px;
+    height: 16px;
+    border: 1px solid var(--smi-ink);
+    display: inline-grid;
+    place-items: center;
+    background: var(--smi-bg);
+}
+.smi-check input:checked + .smi-cb { background: var(--smi-ink); }
+.smi-check input:checked + .smi-cb:after {
+    content: "\f00c";
+    font-family: Icons;
+    font-weight: 900;
+    font-size: 9px;
+    color: var(--smi-bg);
+}
+.smi-check input:focus-visible + .smi-cb { outline: 2px solid var(--smi-acc); outline-offset: 2px; }
+.smi-cbl { margin-left: 8px; font-size: 12px; }
+.smi-cbl:after { content: attr(data-off); }
+.smi-check input:checked ~ .smi-cbl:after { content: attr(data-on); }
+.smi-cbm { display: none; margin-left: 8px; font-size: 12px; }
+
+/* segments «Spento · Giorno · Settimana · Mese» */
+.smi-seg { display: inline-flex; border: 1px solid var(--smi-ink); }
+.smi-seg label { margin: 0; position: relative; cursor: pointer; }
+.smi-seg label span {
+    display: block;
+    padding: 4px 8px;
+    font-size: 10.5px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    font-weight: 600;
+    border-left: 1px solid var(--smi-line);
+    white-space: nowrap;
+}
+.smi-seg label:first-child span { border-left: 0; }
+.smi-seg input:checked + span { background: var(--smi-hi); color: var(--smi-hiink); font-weight: 800; }
+.smi-seg input:focus-visible + span { outline: 2px solid var(--smi-acc); outline-offset: -3px; }
+
+.smi-c-off { display: none; }
+.smistamento-settings .smi-help { font-size: 12px; color: var(--smi-mut); margin: 0 0 6px; }
+
+/* «Smistamento aggiornato …» */
+.smistamento-settings .smi-updated {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 12px; color: var(--smi-mut); margin: 0 0 12px;
+}
+.smistamento-settings .smi-updated .smi-ico:before { content: "\f021"; font-family: Icons; font-weight: 900; font-size: 9px; color: var(--smi-acc); }
+
+/* «Quando arriva il digest» */
+.smi-dg { margin-top: 18px; border-top: 4px double var(--smi-ink); padding-top: 10px; }
+.smi-dg-title { text-transform: uppercase; letter-spacing: .16em; font-weight: 700; font-size: 10.5px; color: var(--smi-ink); }
+.smi-flds { display: flex; flex-wrap: wrap; gap: 10px 14px; margin: 10px 0 8px; align-items: center; font-size: 12.5px; }
+.smi-flds label { margin: 0; }
+.smi-flds select.custom-select { width: auto; min-width: 7em; margin-right: 16px; }
+.smi-note { font-size: 12px; color: var(--smi-mut); line-height: 1.6; margin: 0; }
+
+/* ---------------------------------------------------------------- phone: one card per folder */
+@media screen and (max-width: 768px) {
+    .smi-th { display: none; }
+    .smi-tbl { border-top: 0; }
+    .smi-tr {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        grid-template-areas: "nm active" "read read" "digest digest";
+        row-gap: 8px;
+        border: 1px solid var(--smi-line);
+        background: var(--smi-bg);
+        margin-bottom: 8px;
+        padding: 9px 12px 10px;
+    }
+    .smi-nm { grid-area: nm; font-size: 13px; }
+    .smi-c-active { grid-area: active; }
+    .smi-c-read { grid-area: read; }
+    .smi-c-digest { grid-area: digest; }
+    .smi-cbl { display: none; }
+    .smi-cbm { display: inline; }
+    .smi-seg { display: flex; width: 100%; }
+    .smi-seg label { flex: 1; }
+    .smi-seg label span { text-align: center; padding: 6px 0; font-size: 10px; letter-spacing: .06em; }
+    .smi-tr.off { grid-template-areas: "nm active" "off off"; row-gap: 4px; }
+    .smi-tr.off .smi-c-off { display: block; grid-area: off; font-size: 11px; color: var(--smi-mut); }
+    .smi-tr.off .smi-c-read, .smi-tr.off .smi-c-digest { display: none; }
+    .smi-flds { flex-direction: column; align-items: flex-start; }
+    .smi-flds select.custom-select { margin-right: 0; }
+    .smistamento-settings .smi-title { font-size: 26px; }
+}
+
+/* «Cambia» menu: active folders + Inbox */
+.smistamento-sorted { position: relative; flex-wrap: wrap; }
+.smistamento-move {
+    position: absolute;
+    z-index: 100;
+    top: 100%;
+    left: 0;
+    min-width: 200px;
+    max-height: 260px;
+    overflow-y: auto;
+    background: var(--smi-bg);
+    border: 1px solid var(--smi-ink);
+    box-shadow: 4px 4px 0 rgba(0, 0, 0, .12);
+    padding: 4px 0;
+    display: flex;
+    flex-direction: column;
+}
+.smistamento-move button {
+    border: 0;
+    background: transparent;
+    color: var(--smi-ink);
+    text-align: left;
+    padding: 7px 14px;
+    font: inherit;
+    font-size: 12.5px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    cursor: pointer;
+}
+.smistamento-move button.inbox { border-bottom: 1px dashed var(--smi-line); }
+.smistamento-move button:hover, .smistamento-move button:focus { background: var(--smi-hi); color: var(--smi-hiink); outline: 0; }

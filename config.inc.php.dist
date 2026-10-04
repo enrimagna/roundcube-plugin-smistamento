@@ -1,0 +1,84 @@
+<?php
+
+// Smistamento. Copy this file to config.inc.php and adjust. Every key can also go in Roundcube's main config.
+//
+// The plugin does NOT classify and does NOT train. A server-side classifier (Laya) writes two headers
+// on delivered mail:
+//     X-Laya-Box: <label>          X-Laya-Box-Conf: 0.00–1.00
+// The plugin turns the user's choices into a Sieve script ("smistamento") uploaded over ManageSieve;
+// Dovecot runs it AFTER the user's own filters (see README, «Server setup»).
+
+// ---------------------------------------------------------------------------------------------
+// Headers and threshold
+// ---------------------------------------------------------------------------------------------
+
+$config['smistamento_label_header'] = 'X-Laya-Box';
+$config['smistamento_conf_header'] = 'X-Laya-Box-Conf';
+
+// Below this confidence the mail stays in the Inbox. Compared as text, so Laya must write
+// the value with two decimals ("0.93", "1.00"). null = do not check the confidence (not recommended).
+$config['smistamento_min_conf'] = '0.80';
+
+// ---------------------------------------------------------------------------------------------
+// Label -> folder adapter (lib/smistamento_labels.php)
+// ---------------------------------------------------------------------------------------------
+
+// Explicit label => folder map. Labels are compared case-insensitively. A folder that appears
+// here gets ONLY these labels, plus the automatic ones if smistamento_label_auto is true.
+// Folder = full IMAP name as Roundcube shows it in Settings > Folders, path joined with "/".
+// Example: 'Feed' => 'Feed', 'PaperTrail' => 'Paper Trail', 'Junk' => 'Bulk',
+// The people labels (smistamento_inbox_labels) cannot be mapped: they always mean the Inbox.
+$config['smistamento_label_map'] = [];
+
+// Automatic labels for every folder: full path ("Progetti/2026"), leaf name ("2026") when no other
+// folder has the same leaf, and both without spaces ("PaperTrail" for "Paper Trail").
+$config['smistamento_label_auto'] = true;
+
+// Laya's «persone» class: mail from people. It is never moved: it stays in the Inbox (Posta in arrivo),
+// unread, and is never in a digest. There is no separate people folder and nothing to switch on.
+// The Inbox is exported to Laya as a fixed class with these labels (server/smistamento-server.py classes),
+// so Laya keeps learning «resta in Posta in arrivo». Compared case-insensitively.
+$config['smistamento_inbox_labels'] = ['Imbox'];
+
+// ---------------------------------------------------------------------------------------------
+// ManageSieve (where the "smistamento" script goes)
+// ---------------------------------------------------------------------------------------------
+
+// Host. %h = the user's IMAP host (Roundcube session). Use 'tls://host' for implicit TLS.
+$config['smistamento_managesieve_host'] = '%h';
+$config['smistamento_managesieve_port'] = 4190;
+// STARTTLS. Production: true. A local plain-text test instance only: false.
+$config['smistamento_managesieve_usetls'] = true;
+// Options for stream_context_create(), e.g. ['ssl' => ['verify_peer' => false, 'verify_peer_name' => false]].
+$config['smistamento_managesieve_conn_options'] = null;
+// SASL mechanism (null = best available).
+$config['smistamento_managesieve_auth_type'] = null;
+
+// Name of the managed script. Dovecot must run ~/sieve/<name>.sieve as an "after" script.
+$config['smistamento_script_name'] = 'smistamento';
+
+// Write the managed script with the defaults below at login when the user has none yet.
+// false = nothing is sorted until the user saves Settings > Smistamento once.
+$config['smistamento_bootstrap'] = false;
+
+// ---------------------------------------------------------------------------------------------
+// Defaults
+// ---------------------------------------------------------------------------------------------
+
+// Per folder, used when the user has not saved that folder yet. Key = folder (as in label_map).
+// Example: ['Feed' => ['active' => true, 'read' => false, 'digest' => 'day']]
+$config['smistamento_default_folders'] = [];
+
+// «Quando arriva il digest»
+$config['smistamento_digest_time'] = '07:30';
+$config['smistamento_digest_weekday'] = 1;   // 1 = Monday ... 7 = Sunday
+$config['smistamento_digest_monthday'] = 1;  // 1..28
+
+// ---------------------------------------------------------------------------------------------
+// «Smistamento aggiornato …» line
+// ---------------------------------------------------------------------------------------------
+
+// Path of the user's classifier head file as seen FROM ROUNDCUBE (bind-mount it read-only).
+// %u = username, %l = local part, %d = domain. Its mtime is the date shown.
+// null = no line. Configured but missing file = «Smistamento di base: …».
+$config['smistamento_head_file'] = null;
