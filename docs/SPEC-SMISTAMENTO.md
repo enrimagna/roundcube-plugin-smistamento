@@ -36,6 +36,12 @@ Correggere = spostare a mano: mettere una mail in una cartella attiva, o tirarla
   - «poche mail: servono almeno N»: icona ⚠, colore accento. Sotto la soglia **N** (segnaposto, da definire) la cartella resta attiva ma non riceve smistamenti. Lo stato si aggiorna da solo quando le mail arrivano a N.
 - Il conteggio «N mail» = numero di messaggi nella cartella usati come esempi (formato italiano: «1.032 mail»).
 
+**Blocco Spam** (US-SMI-SPAM, vedi SPEC-DELTA-LAYA), sotto la tabella:
+- interruttore «Lo smistamento gestisce lo spam» (default acceso);
+- se acceso, la riga fissa **Spam** (cartella speciale Spam/Junk): «Soglia Spam» [0,40 ▾] e «Soglia Cestino» [0,80 ▾] (0,10–0,95; la prima più bassa della seconda, altrimenti il salvataggio si ferma con «La soglia Spam deve essere più bassa della soglia Cestino.»), «Dalla soglia Cestino in su» (○ Sposta nel Cestino · ○ Elimina definitivamente: la mail viene cancellata subito e non si può recuperare.), più la nota; niente «Segna come lette» né «Digest»;
+- se spento, la riga è nascosta; soglie e azione restano salvate.
+- Mobile 390 px: card con nome, Soglia Spam, Soglia Cestino, poi le due scelte una sotto l'altra.
+
 **Blocco «Quando arriva il digest»** (unico, globale; niente orari per cartella):
 - «Ora» [07:30 ▾]
 - «Settimanale: ogni» [lunedì ▾]
@@ -87,8 +93,9 @@ Sotto l'intestazione (DA / A / DATA), sopra «Intestazioni · Scarica tutti gli 
 5. Digest uniti per periodicità; nessun digest vuoto; il digest stesso non viene smistato.
 6. *(Proposta)* Spam e mail già spostate dai filtri dell'utente (managesieve) non passano dal classificatore: i filtri dell'utente hanno la precedenza.
 7. *(Proposta)* Spegnere una cartella non sposta indietro nulla: le mail già smistate restano dove sono.
-8. Non si possono attivare: Posta in arrivo, Bozze, Inviata, Spam, Cestino.
+8. Non si possono attivare: Posta in arrivo, Bozze, Inviata, Spam, Cestino. Spam ha solo la sua riga fissa (regola 10).
 9. Le mail delle persone (classe «persone» di Laya, `X-Laya-Box: Imbox`) restano in Posta in arrivo, mai spostate, da leggere, mai nel digest. Non c'è una cartella Imbox. Riga di aiuto in Impostazioni: «Posta in arrivo: le mail delle persone e quelle di cui lo smistamento non è sicuro (o tutte, se è fermo).» Per l'addestramento Posta in arrivo è una classe fissa (vedi README del plugin, export `classes`). *(Deciso il 2026-10-04.)*
+10. Spam di Laya (`X-Laya-Box: Junk`): se l'utente lascia acceso «Lo smistamento gestisce lo spam», confidenza sotto la soglia Spam (default 0,40) → resta in Posta in arrivo; dalla soglia Spam a sotto la soglia Cestino (default 0,80) → Spam; dalla soglia Cestino in su → Cestino o eliminazione; senza confidenza → Spam; mai nel digest. Spento → nessuna regola, la mail resta in Posta in arrivo. Lo spam segnato dal server (`X-Spam-Flag`, malware) non passa da qui. *(US-SMI-SPAM e US-SMI-SPAM2, 2026-10-04.)*
 
 ## 7. Note tecniche da verificare
 I nomi di hook, container e keyword sotto sono indicativi: vanno verificati sul codice di Roundcube 1.7.4.

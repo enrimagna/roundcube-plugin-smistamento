@@ -236,6 +236,28 @@ html:not(.skin-dispaccio) #mailboxlist li.mailbox > a > .smistamento-mark { disp
 .smi-flds select.custom-select { width: auto; min-width: 7em; margin-right: 16px; }
 .smi-note { font-size: 12px; color: var(--smi-mut); line-height: 1.6; margin: 0; }
 
+/* «Lo smistamento gestisce lo spam» + the fixed Spam row */
+.smi-spam-block { margin-top: 18px; }
+.smi-spam-sw { padding: 10px 0; border-top: 1px solid var(--smi-ink); }
+.smi-spam-sw .smi-spam-swt { margin-left: 12px; font-size: 13px; font-weight: 600; color: var(--smi-ink); }
+.smi-tbl-spam.smi-hide { display: none !important; }
+.smi-tbl-spam { border-top: 1px solid var(--smi-line); }
+.smi-tbl-spam .smi-th, .smi-tbl-spam .smi-tr { grid-template-columns: minmax(140px, 1fr) 130px 130px minmax(250px, 1.6fr); }
+.smi-tbl-spam .smi-tr { padding: 6px 0; }
+.smi-c-thr select.custom-select, .smi-c-thr2 select.custom-select { width: auto; min-width: 6.5em; }
+.smi-c-err { grid-column: 1 / -1; display: none; font-size: 12.5px; font-weight: 600; color: var(--smi-acc); }
+.smi-tr.smi-invalid .smi-c-err { display: block; }
+.smi-tr.smi-invalid select.smi-thr { border-color: var(--smi-acc); box-shadow: 0 0 0 1px var(--smi-acc); }
+.smi-thr-m { display: none; margin: 0 8px 0 0; font-size: 12px; }
+.smi-c-act { display: flex; flex-direction: column; gap: 6px; }
+.smi-radio { display: inline-flex; align-items: flex-start; gap: 8px; margin: 0; cursor: pointer; position: relative; font-size: 12.5px; line-height: 1.45; }
+.smi-radio input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
+.smi-rb { flex: 0 0 auto; width: 14px; height: 14px; margin-top: 2px; border: 1px solid var(--smi-ink); border-radius: 50%; background: var(--smi-bg); display: inline-grid; place-items: center; }
+.smi-radio input:checked + .smi-rb:after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--smi-ink); }
+.smi-radio input:focus-visible + .smi-rb { outline: 2px solid var(--smi-acc); outline-offset: 2px; }
+.smi-radio.smi-danger input:checked ~ .smi-rbl { color: var(--smi-acc); font-weight: 600; }
+.smi-spam-note { margin-top: 8px; }
+
 /* ---------------------------------------------------------------- phone: one card per folder */
 @media screen and (max-width: 768px) {
     .smi-th { display: none; }
@@ -262,6 +284,13 @@ html:not(.skin-dispaccio) #mailboxlist li.mailbox > a > .smistamento-mark { disp
     .smi-tr.off { grid-template-areas: "nm active" "off off"; row-gap: 4px; }
     .smi-tr.off .smi-c-off { display: block; grid-area: off; font-size: 11px; color: var(--smi-mut); }
     .smi-tr.off .smi-c-read, .smi-tr.off .smi-c-digest { display: none; }
+    .smi-tbl-spam .smi-tr { grid-template-columns: 1fr; grid-template-areas: "nm" "thr" "thr2" "err" "act"; }
+    .smi-c-thr { grid-area: thr; display: flex; align-items: center; }
+    .smi-c-thr2 { grid-area: thr2; display: flex; align-items: center; }
+    .smi-c-err { grid-area: err; grid-column: auto; }
+    .smi-tbl-spam .smi-thr-m { flex: 0 0 8.5em; }
+    .smi-c-act { grid-area: act; }
+    .smi-thr-m { display: inline; }
     .smi-flds { flex-direction: column; align-items: flex-start; }
     .smi-flds select.custom-select { margin-right: 0; }
     .smistamento-settings .smi-title { font-size: 26px; }

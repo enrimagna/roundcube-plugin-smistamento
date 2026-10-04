@@ -73,7 +73,28 @@ window.rcmail && rcmail.addEventListener('init', function () {
     if (rcmail.env.task == 'settings' && rcmail.gui_objects.smistamentoform) {
         var form = rcmail.gui_objects.smistamentoform;
 
+        // Spam row: the Spam threshold must be lower than the Cestino one (checked again on the server)
+        var spam_check = function (on_save) {
+            var thr = $('#smi-spam-threshold', form), trash = $('#smi-spam-trash-threshold', form),
+                bad = thr.length && trash.length && $('#smi-spam-active', form).is(':checked')
+                    && parseFloat(thr.val()) >= parseFloat(trash.val());
+            if (!bad && !on_save && !$('#smi-spam-row').hasClass('smi-invalid')) {
+                return true;
+            }
+            $('#smi-spam-row').toggleClass('smi-invalid', !!bad);
+            thr.add(trash).attr('aria-invalid', bad ? 'true' : null);
+            $('#smi-spam-err').text(bad ? rcmail.get_label('smistamento.spam_err_order') : '');
+            return !bad;
+        };
+
+        $('#smi-spam-threshold, #smi-spam-trash-threshold', form).on('change', function () { spam_check(false); });
+
         rcmail.register_command('plugin.smistamento-save', function () {
+            if (!spam_check(true)) {
+                rcmail.display_message(rcmail.get_label('smistamento.spam_err_order'), 'error');
+                $('#smi-spam-threshold', form).focus();
+                return;
+            }
             rcmail.set_busy(true, 'loading');
             form.submit();
         }, true);
@@ -86,8 +107,14 @@ window.rcmail && rcmail.addEventListener('init', function () {
             $('label.smi-switch', row).attr('title', on ? null : rcmail.get_label('smistamento.tip_off'));
         };
 
-        $('.smi-tr', form).each(function () { sync(this); })
+        $('.smi-tr:not(.smi-spam)', form).each(function () { sync(this); })
             .on('change', 'input.smi-active', function () { sync($(this).closest('.smi-tr')[0]); });
+
+        // «Lo smistamento gestisce lo spam»: off = the Spam row is hidden, its values stay in the form
+        $('#smi-spam-active', form).on('change', function () {
+            $('#smi-spam-tbl').toggleClass('smi-hide', !this.checked);
+            spam_check(false);
+        });
 
         // opened from the folder menu: scroll to the folder row and flash it
         if (rcmail.env.smistamento_highlight) {

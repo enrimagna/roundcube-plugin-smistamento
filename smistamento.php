@@ -29,6 +29,9 @@ class smistamento extends rcube_plugin
     private $line_done = false;
     private $settings;
     private $sieve_error = false;
+    private $spam_error = ''; // error label when the save was refused
+    /** @var array|null folders + spam as the user submitted them (save refused) */
+    private $form_override;
 
     public function init()
     {
@@ -54,7 +57,7 @@ class smistamento extends rcube_plugin
         $this->add_hook('folder_delete', [$this, 'folder_delete']);
 
         if ($this->rc->task == 'settings') {
-            $this->add_texts('localization/', ['tip_off']);
+            $this->add_texts('localization/', ['tip_off', 'spam_err_order']);
             $this->add_hook('settings_actions', [$this, 'settings_actions']);
             $this->register_action('plugin.smistamento', [$this, 'action_settings']);
             $this->register_action('plugin.smistamento-save', [$this, 'action_save']);
@@ -88,7 +91,37 @@ class smistamento extends rcube_plugin
     {
         $c = $this->rc->config;
         return ['time' => $c->get('smistamento_digest_time', '07:30'), 'weekday' => $c->get('smistamento_digest_weekday', 1),
-            'monthday' => $c->get('smistamento_digest_monthday', 1)];
+            'monthday' => $c->get('smistamento_digest_monthday', 1),
+            'spam' => (array) $c->get('smistamento_spam_default', ['active' => true, 'threshold' => '0.40', 'trash_threshold' => '0.80', 'action' => 'trash'])];
+    }
+
+    /**
+     * The «Spam» row: the special Junk folder, the Trash it moves to, Laya's spam labels.
+     * null when there is no Junk folder or no spam label configured (no row, no rule).
+     */
+    private function spam_info()
+    {
+        $storage = $this->rc->get_storage();
+        $special = (array) $storage->get_special_folders();
+        $junk = $special['junk'] ?? null;
+        $labels = smistamento_labels::from_config($this->rc->config)->spam_labels();
+        if (!$junk || !$labels || !$storage->folder_exists($junk)) {
+            return null;
+        }
+        $trash = $special['trash'] ?? 'Trash';
+        return ['folder' => $junk, 'mailbox' => smistamento_core::utf8_name($junk), 'path' => smistamento_core::path($storage, $junk),
+            'trash' => smistamento_core::utf8_name($trash), 'labels' => $labels];
+    }
+
+    private function save_prefs(array $p)
+    {
+        $this->rc->user->save_prefs([
+            'smistamento_folders' => $p['folders'],
+            'smistamento_spam' => $p['spam'],
+            'smistamento_digest_time' => $p['time'],
+            'smistamento_digest_weekday' => $p['weekday'],
+            'smistamento_digest_monthday' => $p['monthday'],
+        ]);
     }
 
     /**
@@ -105,6 +138,7 @@ class smistamento extends rcube_plugin
         $prefs = (array) $this->rc->user->get_prefs();
         $raw = [
             'folders' => (array) ($prefs['smistamento_folders'] ?? []),
+            'spam' => $prefs['smistamento_spam'] ?? null,
             'time' => $prefs['smistamento_digest_time'] ?? null,
             'weekday' => $prefs['smistamento_digest_weekday'] ?? null,
             'monthday' => $prefs['smistamento_digest_monthday'] ?? null,
@@ -117,8 +151,8 @@ class smistamento extends rcube_plugin
                 $this->sieve_error = true;
                 rcube::raise_error(['code' => 600, 'message' => 'smistamento: ManageSieve ' . $sieve->error()], true, false);
             } elseif ($data = smistamento_core::parse_script($script)) {
-                $raw = ['folders' => [], 'time' => $data['time'] ?? null, 'weekday' => $data['weekday'] ?? null,
-                    'monthday' => $data['monthday'] ?? null];
+                $raw = ['folders' => [], 'spam' => $data['spam'] ?? ($raw['spam'] ?? null), 'time' => $data['time'] ?? null,
+                    'weekday' => $data['weekday'] ?? null, 'monthday' => $data['monthday'] ?? null];
                 foreach ((array) ($data['folders'] ?? []) as $f) {
                     if (isset($f['mailbox'])) {
                         $raw['folders'][rcube_charset::convert($f['mailbox'], RCUBE_CHARSET, 'UTF7-IMAP')] = $f;
@@ -175,12 +209,7 @@ class smistamento extends rcube_plugin
     /** Write prefs + managed script. Returns true, or false if the script could not be written. */
     private function persist(array $p)
     {
-        $this->rc->user->save_prefs([
-            'smistamento_folders' => $p['folders'],
-            'smistamento_digest_time' => $p['time'],
-            'smistamento_digest_weekday' => $p['weekday'],
-            'smistamento_digest_monthday' => $p['monthday'],
-        ]);
+        $this->save_prefs($p);
         $this->settings = $p;
 
         $storage = $this->rc->get_storage();
@@ -198,6 +227,7 @@ class smistamento extends rcube_plugin
             'conf_header' => $this->rc->config->get('smistamento_conf_header', 'X-Laya-Box-Conf'),
             'min_conf' => $this->rc->config->get('smistamento_min_conf', '0.80'),
             'inbox_labels' => $labels->inbox_labels(),
+            'spam' => $this->spam_info(),
             'lang' => $_SESSION['language'] ?? 'it_IT',
             'user' => $this->rc->get_user_name(),
             'timezone' => $this->timezone(),
@@ -294,14 +324,17 @@ class smistamento extends rcube_plugin
                 $_SESSION['smistamento_synced'] = true;
                 $p = $this->settings(true);
                 if (!$this->sieve_error) {
-                    $this->rc->user->save_prefs(['smistamento_folders' => $p['folders'], 'smistamento_digest_time' => $p['time'],
-                        'smistamento_digest_weekday' => $p['weekday'], 'smistamento_digest_monthday' => $p['monthday']]);
+                    $this->save_prefs($p);
                 }
             } else {
                 $p = $this->settings(false);
             }
             $allowed = $this->user_folders();
-            $this->rc->output->set_env('smistamento_active', array_values(array_intersect(smistamento_core::active_folders($p), $allowed)));
+            $active = array_values(array_intersect(smistamento_core::active_folders($p), $allowed));
+            if (($spam = $this->spam_info()) && $p['spam']['active']) {
+                $active[] = $spam['folder']; // ↻ and the folder-menu entry on the spam folder too
+            }
+            $this->rc->output->set_env('smistamento_active', $active);
             $this->rc->output->set_env('smistamento_allowed', $allowed);
 
         }
@@ -350,6 +383,19 @@ class smistamento extends rcube_plugin
             return '';
         }
 
+        $storage = $this->rc->get_storage();
+        $folder = $this->message->folder;
+        $labels = smistamento_labels::from_config($cfg);
+
+        // spam: only in the spam folder (Sieve files it there between the two thresholds, or without a confidence)
+        if ($labels->is_spam($label)) {
+            $spam = $this->spam_info();
+            if (!$spam || $folder !== $spam['folder'] || !$this->settings(false)['spam']['active']) {
+                return '';
+            }
+            return $this->sorted_html($folder);
+        }
+
         // low confidence: Sieve left it in the Inbox, so it was not "sorted" even if moved here by hand
         $min = $cfg->get('smistamento_min_conf', '0.80');
         $conf = trim((string) $headers->get(strtolower($cfg->get('smistamento_conf_header', 'X-Laya-Box-Conf')), true));
@@ -358,13 +404,18 @@ class smistamento extends rcube_plugin
         }
 
         // only while the mail is in the folder its label points to
-        $storage = $this->rc->get_storage();
-        $folder = $this->message->folder;
         $path = smistamento_core::path($storage, $folder);
-        $labels = smistamento_labels::from_config($cfg);
         if ($folder === 'INBOX' || $labels->folder_for($label, [$path], $this->all_paths()) === null) {
             return '';
         }
+
+        return $this->sorted_html($folder);
+    }
+
+    /** «↻ Smistata in <folder> · Cambia», with the move menu targets. */
+    private function sorted_html($folder)
+    {
+        $storage = $this->rc->get_storage();
 
         // «Cambia»: move menu limited to the active folders + Inbox
         $p = $this->settings(false);
@@ -376,7 +427,8 @@ class smistamento extends rcube_plugin
         }
         $this->rc->output->set_env('smistamento_targets', $targets);
 
-        $name = smistamento_core::display_name($storage, $folder);
+        $spam = $this->spam_info();
+        $name = $spam && $spam['folder'] === $folder ? $this->rc->localize_foldername($folder) : smistamento_core::display_name($storage, $folder);
         return html::div(['class' => 'smistamento-sorted', 'id' => 'smistamento-sorted'],
             html::span(['class' => 'smistamento-icon', 'aria-hidden' => 'true'], '')
             . html::span(null, rcube::Q($this->gettext('sorted_in')) . ' ' . html::tag('b', null, rcube::Q($name)))
@@ -442,8 +494,47 @@ class smistamento extends rcube_plugin
         // forget folders that no longer exist / are not allowed
         $p['folders'] = array_intersect_key($p['folders'], array_flip($allowed));
 
+        $spam_in = $p['spam'];
+        $spam_error = '';
+        if ($this->spam_info()) {
+            $spam_in = [
+                'active' => !empty(rcube_utils::get_input_value('_spam_active', rcube_utils::INPUT_POST)),
+                'threshold' => (string) rcube_utils::get_input_value('_spam_threshold', rcube_utils::INPUT_POST),
+                'trash_threshold' => (string) rcube_utils::get_input_value('_spam_trash_threshold', rcube_utils::INPUT_POST),
+                'action' => rcube_utils::get_input_value('_spam_action', rcube_utils::INPUT_POST),
+            ];
+            $spam_error = smistamento_core::spam_check($spam_in['threshold'], $spam_in['trash_threshold']);
+            if ($spam_error && !$spam_in['active']) {
+                // switch off: the row is hidden, keep the saved thresholds and save the rest
+                $spam_in['threshold'] = $p['spam']['threshold'];
+                $spam_in['trash_threshold'] = $p['spam']['trash_threshold'];
+                $spam_error = '';
+            }
+        }
+
+        if ($spam_error) {
+            // nothing is saved: the page comes back with what the user chose, and the message
+            $this->form_override = smistamento_core::normalize([
+                'folders' => $p['folders'],
+                'time' => rcube_utils::get_input_value('_digest_time', rcube_utils::INPUT_POST),
+                'weekday' => rcube_utils::get_input_value('_digest_weekday', rcube_utils::INPUT_POST),
+                'monthday' => rcube_utils::get_input_value('_digest_monthday', rcube_utils::INPUT_POST),
+            ], $p);
+            $this->form_override['spam'] = [
+                'active' => true,
+                'threshold' => str_replace(',', '.', $spam_in['threshold']),
+                'trash_threshold' => str_replace(',', '.', $spam_in['trash_threshold']),
+                'action' => in_array($spam_in['action'], smistamento_core::SPAM_ACTIONS, true) ? $spam_in['action'] : 'trash',
+            ];
+            $this->spam_error = $spam_error;
+            $this->rc->output->show_message('smistamento.' . $spam_error, 'error');
+            $this->action_settings();
+            return;
+        }
+
         $p = smistamento_core::normalize([
             'folders' => $p['folders'],
+            'spam' => $spam_in,
             'time' => rcube_utils::get_input_value('_digest_time', rcube_utils::INPUT_POST),
             'weekday' => rcube_utils::get_input_value('_digest_weekday', rcube_utils::INPUT_POST),
             'monthday' => rcube_utils::get_input_value('_digest_monthday', rcube_utils::INPUT_POST),
@@ -480,10 +571,70 @@ class smistamento extends rcube_plugin
         return $this->gettext(['name' => 'model_updated', 'vars' => ['date' => smistamento_core::long_day($this, $d)]]);
     }
 
+    /**
+     * Spam handling: the switch «Lo smistamento gestisce lo spam» and, when it is on, the fixed «Spam» row
+     * (Soglia Spam, Soglia Cestino, Dalla soglia Cestino in su: Cestino / Elimina definitivamente). Off = row hidden, values kept.
+     */
+    private function spam_block(array $s)
+    {
+        $info = $this->spam_info();
+        if (!$info) {
+            return '';
+        }
+        $Q = static function ($t) { return rcube::Q($t); };
+        $name = $this->rc->localize_foldername($info['folder']);
+
+        $switch = html::div(['class' => 'smi-spam-sw'],
+            html::label(['class' => 'smi-switch', 'for' => 'smi-spam-active'],
+                html::tag('input', ['type' => 'checkbox', 'name' => '_spam_active', 'value' => 1, 'id' => 'smi-spam-active',
+                    'checked' => $s['active'] ? 'checked' : null, 'aria-controls' => 'smi-spam-tbl'])
+                . html::span(['class' => 'smi-sw', 'aria-hidden' => 'true'], '')
+                . html::span(['class' => 'smi-swl', 'data-on' => $this->gettext('yes_caps'), 'data-off' => $this->gettext('no_caps'), 'aria-hidden' => 'true'], '')
+                . html::span(['class' => 'smi-spam-swt'], $Q($this->gettext('spam_switch')))));
+
+        $head = html::div(['class' => 'smi-th', 'aria-hidden' => 'true'],
+            html::span(null, $Q($this->gettext('spam_col')))
+            . html::span(null, $Q($this->gettext('spam_threshold')))
+            . html::span(null, $Q($this->gettext('spam_trash_threshold')))
+            . html::span(null, $Q($this->gettext('spam_action'))));
+
+        $invalid = $this->spam_error ? 'true' : null;
+        $select = function ($name, $id, $label, $value, $cls) use ($invalid) {
+            $sel = new html_select(['name' => $name, 'id' => $id, 'class' => 'custom-select smi-thr ' . $cls,
+                'aria-label' => $this->gettext($label), 'aria-invalid' => $invalid,
+                'aria-describedby' => 'smi-spam-err']);
+            foreach (smistamento_core::spam_thresholds() as $t) {
+                $sel->add(str_replace('.', $this->gettext('decimal_sep'), $t), $t);
+            }
+            return html::label(['class' => 'smi-thr-m', 'for' => $id], rcube::Q($this->gettext($label))) . $sel->show($value);
+        };
+
+        $acts = '';
+        foreach (['trash' => 'spam_trash', 'discard' => 'spam_discard'] as $v => $label) {
+            $acts .= html::label(['class' => 'smi-radio' . ($v == 'discard' ? ' smi-danger' : '')],
+                html::tag('input', ['type' => 'radio', 'name' => '_spam_action', 'value' => $v, 'checked' => $s['action'] == $v ? 'checked' : null])
+                . html::span(['class' => 'smi-rb', 'aria-hidden' => 'true'], '')
+                . html::span(['class' => 'smi-rbl'], $Q($this->gettext($label))));
+        }
+
+        $row = html::div(['class' => 'smi-tr smi-spam on' . ($this->spam_error ? ' smi-invalid' : ''), 'data-folder' => $info['folder'], 'id' => 'smi-spam-row'],
+            html::div(['class' => 'smi-nm'], html::span(['class' => 'smi-name'], $Q($name)) . html::span(['class' => 'smi-mark', 'aria-hidden' => 'true'], ''))
+            . html::div(['class' => 'smi-c-thr'], $select('_spam_threshold', 'smi-spam-threshold', 'spam_threshold', $s['threshold'], 'smi-thr-spam'))
+            . html::div(['class' => 'smi-c-thr2'], $select('_spam_trash_threshold', 'smi-spam-trash-threshold', 'spam_trash_threshold', $s['trash_threshold'], 'smi-thr-trash'))
+            . html::div(['class' => 'smi-c-act', 'role' => 'radiogroup', 'aria-label' => $this->gettext('spam_action')], $acts)
+            . html::div(['class' => 'smi-c-err', 'id' => 'smi-spam-err', 'role' => 'alert', 'aria-live' => 'polite'],
+                $this->spam_error ? $Q($this->gettext($this->spam_error)) : ''));
+
+        return html::div(['class' => 'smi-spam-block'],
+            $switch
+            . html::div(['class' => 'smi-tbl smi-tbl-spam' . ($s['active'] ? '' : ' smi-hide'), 'id' => 'smi-spam-tbl'],
+                $head . $row . html::p(['class' => 'smi-note smi-spam-note'], $Q($this->gettext('spam_note')))));
+    }
+
     public function settings_form($attrib)
     {
         $storage = $this->rc->get_storage();
-        $p = $this->settings();
+        $p = $this->form_override ?: $this->settings();
         $folders = $this->user_folders();
         $Q = static function ($s) { return rcube::Q($s); };
 
@@ -560,6 +711,7 @@ class smistamento extends rcube_plugin
         }
 
         $out .= html::div(['class' => 'smi-tbl'], $head . $rows);
+        $out .= $this->spam_block($p['spam']);
 
         // «Quando arriva il digest»
         $sel_time = new html_select(['name' => '_digest_time', 'id' => 'smi-time', 'class' => 'custom-select']);

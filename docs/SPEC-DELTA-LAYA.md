@@ -5,7 +5,7 @@ Il resto di SPEC-SMISTAMENTO resta valido. Modello e training: SPEC-LAYA.
 **Aggiornato il 2026-10-04 (decisioni del proprietario del progetto):**
 - niente cartella Imbox: le mail delle persone (`X-Laya-Box: Imbox`) restano in Posta in arrivo;
 - la testa di Laya è per utente, e le sue classi sono quelle del file `classes` di quell'utente: prima Posta in arrivo (`Imbox`), poi le sue cartelle attive. Niente righe fisse Imbox/Feed/Paper Trail/Junk;
-- Junk non è una classe: lo spam lo ferma il server, e il plugin non lascia attivare Junk.
+- ~~Junk non è una classe~~ → sostituito da US-SMI-SPAM (sotto): Laya può etichettare lo spam, e la cartella Spam ha una riga fissa in Impostazioni.
 
 1. La tabella ha una riga per ogni cartella dell'utente, come in SPEC-SMISTAMENTO. Niente righe fisse, niente colonna «Cosa ci finisce».
 2. Niente riga Imbox. In alto, la riga di aiuto: «Posta in arrivo: le mail delle persone e quelle di cui lo smistamento non è sicuro (o tutte, se è fermo).»
@@ -16,3 +16,27 @@ Il resto di SPEC-SMISTAMENTO resta valido. Modello e training: SPEC-LAYA.
 7. «Smistata in Feed · Cambia»: Cambia apre il menu Sposta, con Posta in arrivo + le cartelle attive. Il segno ↻ e la voce nel menu ⋮ compaiono solo sulle cartelle attive.
 8. Il digest ha una sezione per ogni cartella attiva con quella periodicità. Mai Posta in arrivo, quindi mai le mail delle persone.
 9. Le etichette persone stanno in `smistamento_inbox_labels` (default `['Imbox']`). Nell'export `classes` Posta in arrivo è sempre la prima classe: `"mailbox": "INBOX"`, `"role": "inbox"`, `"label": "Imbox"`.
+
+## US-SMI-SPAM — riga Spam configurabile (2026-10-04)
+
+Come utente voglio decidere cosa succede allo spam che Laya riconosce, per non doverlo svuotare a mano.
+
+1. **Interruttore di pagina** sotto la tabella delle cartelle: «Lo smistamento gestisce lo spam», **acceso di default**. Inglese: «Sorting handles spam».
+   - Acceso: sotto compare la riga **Spam** (la cartella Spam/Junk speciale di Roundcube) con Soglia Spam, Soglia Cestino e Dalla soglia Cestino in su.
+   - Spento: la riga sparisce. Sieve non fa niente con l'etichetta spam: la mail segue le regole normali, cioè resta in Posta in arrivo (l'etichetta spam non è mai l'etichetta di una cartella). Soglie e azione salvate restano lì e tornano quando lo si riaccende.
+2. La riga Spam non ha «Segna come lette» né «Digest»: lo spam non entra mai nel digest. Le altre cartelle speciali (Bozze, Inviata, Cestino) restano escluse.
+3. Etichetta configurabile: `smistamento_spam_labels` (default `['Junk']`; `[]` = niente classe spam, niente interruttore, niente riga).
+4. **Due soglie** per utente (US-SMI-SPAM2, 2026-10-04), da 0,10 a 0,95 a passi di 0,05: **Soglia Spam** (default **0,40**) e **Soglia Cestino** (default **0,80**). Inglese: «Spam threshold» / «Trash threshold». Non vale la soglia generale 0,80 delle altre cartelle, che resta separata.
+   - confidenza < soglia Spam → resta in Posta in arrivo (Sieve `stop`, nessuna regola di cartella);
+   - soglia Spam ≤ confidenza < soglia Cestino → cartella Spam (l'utente la controlla; serve ad allenare lo smistamento);
+   - confidenza ≥ soglia Cestino → l'azione scelta;
+   - etichetta spam senza confidenza → cartella Spam.
+   - **Controllo al salvataggio**: la soglia Spam deve essere più bassa della soglia Cestino. Se non lo è, la pagina non salva e lo dice sotto la riga e nel messaggio: «La soglia Spam deve essere più bassa della soglia Cestino.» (inglese: «The Spam threshold must be lower than the Trash threshold.»). Il controllo c'è nella pagina e sul server. Con l'interruttore spento la riga è nascosta: se le soglie inviate non vanno bene si tengono quelle salvate e il resto si salva.
+   - **Migrazione** delle impostazioni con una sola soglia (JSON `v: 1`, o preferenze vecchie): la vecchia soglia diventa la soglia Spam; la soglia Cestino è 0,80, o la vecchia soglia se è più alta. Se così le due soglie sarebbero uguali (vecchia soglia 0,80 o più), la soglia Spam scende di 0,05 e il punto da cui scatta l'azione resta quello di prima (es. 0,90 → Spam 0,85, Cestino 0,90).
+5. **Dalla soglia Cestino in su** (inglese «At or above the Trash threshold»): «Sposta nel Cestino» (default) oppure «Elimina definitivamente: la mail viene cancellata subito e non si può recuperare.» (Sieve `discard`; la scelta è in arancio quando è selezionata). Inglese: «Move to Trash» / «Delete permanently: the mail is deleted at once and cannot be recovered.»
+6. Nota sotto la riga: «Sotto la prima soglia la mail resta in Posta in arrivo. Tra le due soglie va nella cartella Spam, dove puoi controllarla: serve ad allenare lo smistamento. Dalla seconda soglia in su va nel Cestino o viene eliminata, come scegli qui.» Inglese: «Below the first threshold the mail stays in the Inbox. Between the two thresholds it goes to the Spam folder, where you can check it: it helps sorting learn. From the second threshold up it goes to the Trash or is deleted, as you choose here.»
+7. I filtri dell'utente vincono (lo script Smistamento gira dopo i suoi filtri).
+8. Ogni salvataggio riscrive lo script Sieve. Tutto per utente; default in `smistamento_spam_default` (`active` = interruttore, `threshold` = soglia Spam, `trash_threshold` = soglia Cestino, `action`). Nel JSON dello script (`v: 2`) la voce `spam` porta `threshold`, `trash_threshold` e `action`.
+9. Export `classes`: con l'interruttore acceso, subito dopo Posta in arrivo c'è la classe spam: `"mailbox": "Junk"` (la cartella speciale), `"role": "spam"`, `"label": "Junk"`. Spento: niente classe spam (Laya non la addestra per quell'utente).
+10. **Spam segnato dal server** (`X-Spam-Flag: YES`, `X-Malware-Bazaar: hit`): comportamento invariato, Smistamento non lo tocca e lo gestisce il server. Raccomandazione: lasciarlo fuori da soglie e azione. Il flag del server è un sì/no senza confidenza, quindi una soglia non ha senso; e mandare al Cestino o eliminare su un flag binario renderebbe irrecuperabili i falsi positivi del filtro server. Il malware va respinto o messo in quarantena dal server, non deciso dall'utente.
+

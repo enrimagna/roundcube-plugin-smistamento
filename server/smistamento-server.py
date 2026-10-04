@@ -9,6 +9,7 @@ digest goes into that user's INBOX, the send state is one file per user.
   digest    send the due digests («Il Dispaccio»). Run from cron every 15 minutes.
   classes   export each user's classes for Laya's weekly training (one JSON file per user, keyed by full
             address): first the fixed Inbox class («persone»: mail from people, never moved), then
+            the spam class (special Junk folder, while the user lets Smistamento handle spam), then
             the active folders, each with the X-Laya-Box labels Sieve accepts for it.
   show      print a user's settings (debug).
 
@@ -416,6 +417,11 @@ def cmd_classes(a, doveadm, users):
         # so Laya always has a «stays in Posta in arrivo» class. Never moved, never in a digest.
         classes = [{"mailbox": "INBOX", "path": "INBOX", "role": "inbox", "label": inbox_labels[0],
                     "accepts": inbox_labels}]
+        # spam class (the special Junk folder), only while «Lo smistamento gestisce lo spam» is on
+        sp = s.get("spam") or {}
+        if sp.get("active") and sp.get("labels") and sp.get("mailbox"):
+            classes.append({"mailbox": sp["mailbox"], "path": sp.get("path"), "role": "spam",
+                            "label": sp["labels"][0], "accepts": sp["labels"]})
         for f in s.get("folders", []):
             if f.get("active") and not f.get("imbox") and f.get("mailbox") != "INBOX":
                 classes.append({"mailbox": f["mailbox"], "path": f.get("path"), "role": "folder",
@@ -426,7 +432,8 @@ def cmd_classes(a, doveadm, users):
         tmp = path + ".tmp"
         json.dump(data, open(tmp, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
         os.replace(tmp, path)
-        print("%s: Inbox + %d active folder(s) -> %s" % (user, len(classes) - 1, path))
+        n_spam = sum(1 for c in classes if c["role"] == "spam")
+        print("%s: Inbox%s + %d active folder(s) -> %s" % (user, " + spam" if n_spam else "", len(classes) - 1 - n_spam, path))
 
 
 def main():

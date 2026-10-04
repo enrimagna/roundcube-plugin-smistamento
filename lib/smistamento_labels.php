@@ -20,20 +20,44 @@ class smistamento_labels
     private $map = [];
     private $auto = true;
     private $inbox = [];
+    private $spam = [];
 
-    public function __construct(array $map = [], $auto = true, array $inbox = ['Imbox'])
+    public function __construct(array $map = [], $auto = true, array $inbox = ['Imbox'], array $spam = [])
     {
         foreach ($inbox as $label) {
             if (self::norm($label) !== '') {
                 $this->inbox[self::norm($label)] = (string) $label;
             }
         }
+        foreach ($spam as $label) {
+            if (self::norm($label) !== '' && !isset($this->inbox[self::norm($label)])) {
+                $this->spam[self::norm($label)] = (string) $label;
+            }
+        }
         foreach ($map as $label => $path) {
-            if (!isset($this->inbox[self::norm($label)])) {
+            if (!$this->reserved($label)) {
                 $this->map[self::norm($label)] = (string) $path;
             }
         }
         $this->auto = (bool) $auto;
+    }
+
+    /** Labels of Laya's spam class (handled by the «Spam» row, never by a folder rule). */
+    public function spam_labels()
+    {
+        return array_values($this->spam);
+    }
+
+    /** Inbox or spam label: never the label of an ordinary folder. */
+    public function reserved($label)
+    {
+        $n = self::norm($label);
+        return isset($this->inbox[$n]) || isset($this->spam[$n]);
+    }
+
+    public function is_spam($label)
+    {
+        return isset($this->spam[self::norm($label)]);
     }
 
     /** Labels that mean «mail from people»: they keep the mail in the Inbox. */
@@ -48,7 +72,7 @@ class smistamento_labels
             return is_array($config) ? ($config[$k] ?? $d) : $config->get($k, $d);
         };
         return new self((array) $get('smistamento_label_map', []), $get('smistamento_label_auto', true),
-            (array) $get('smistamento_inbox_labels', ['Imbox']));
+            (array) $get('smistamento_inbox_labels', ['Imbox']), (array) $get('smistamento_spam_labels', ['Junk']));
     }
 
     /**
@@ -96,7 +120,7 @@ class smistamento_labels
 
         $out = [];
         foreach ($labels as $l) {
-            if (!isset($this->inbox[self::norm($l)])) { // a folder called «Imbox» never takes people's mail
+            if (!$this->reserved($l)) { // a folder called «Imbox» / «Junk» never takes people's or spam mail
                 $out[self::norm($l)] = $l;
             }
         }

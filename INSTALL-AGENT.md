@@ -1,7 +1,7 @@
 # Installare Smistamento: istruzioni per un agente
 
 Questo file è un prompt completo. Copialo tutto e dallo all'agente (es. Grok Build) che lavora sul server.
-Repository: https://github.com/enrimagna/roundcube-plugin-smistamento (release `v1.0.0`, file `smistamento.zip`).
+Repository: https://github.com/enrimagna/roundcube-plugin-smistamento (release `v1.1.0`, file `smistamento.zip`).
 
 ---
 
@@ -17,6 +17,12 @@ controllo fallisce, fermati e riferisci all'umano: non improvvisare correzioni s
   ManageSieve. Lo script sposta le mail in base agli header `X-Laya-Box` / `X-Laya-Box-Conf`.
 - Un blocco Dovecot che esegue quello script **dopo** i filtri dell'utente (`type = after`).
 - Uno script Python (`smistamento-server.py`) lanciato da cron: digest e export delle classi.
+- La gestione dello spam di Laya (etichetta `Junk`): in Impostazioni › Smistamento ogni utente ha
+  l'interruttore «Lo smistamento gestisce lo spam» (acceso di default) e due soglie: **Soglia Spam 0,40**
+  e **Soglia Cestino 0,80**. Confidenza sotto 0,40 → resta in Posta in arrivo; da 0,40 a sotto 0,80 →
+  cartella Spam (l'utente la controlla, e serve ad allenare lo smistamento); da 0,80 in su → Cestino (o
+  eliminazione, se l'utente sceglie «Elimina definitivamente»); senza confidenza → Spam. Lo spam segnato
+  dal server (`X-Spam-Flag: YES`, MalwareBazaar) non passa da qui: resta come oggi.
 
 **Fuori dal tuo compito:** il servizio Laya che scrive gli header `X-Laya-Box` sulle mail in arrivo.
 Senza Laya il plugin funziona, ma nessuna mail viene spostata (resta tutto in Posta in arrivo). Non
@@ -109,7 +115,7 @@ Scrivi il percorso del backup nel rapporto.
 
 ```bash
 cd /tmp
-curl -fsSLO https://github.com/enrimagna/roundcube-plugin-smistamento/releases/download/v1.0.0/smistamento.zip
+curl -fsSLO https://github.com/enrimagna/roundcube-plugin-smistamento/releases/download/v1.1.0/smistamento.zip
 unzip -o smistamento.zip -d /tmp/smistamento-release      # crea /tmp/smistamento-release/smistamento/
 ls /tmp/smistamento-release/smistamento/smistamento.php
 ```
@@ -172,10 +178,18 @@ $config['smistamento_managesieve_conn_options'] = ['ssl' => ['verify_peer' => fa
 $config['smistamento_min_conf'] = '0.80';
 $config['smistamento_inbox_labels'] = ['Imbox'];                    // mail delle persone: restano in Posta in arrivo
 $config['smistamento_head_file'] = '/laya/heads/%u.joblib';         // %u = indirizzo completo; mount :ro
+
+// Spam di Laya: etichette e default sono configurabili. Questi sono i default del plugin: scrivili
+// solo se l'umano vuole valori diversi.
+// $config['smistamento_spam_labels'] = ['Junk'];                   // [] = niente gestione spam (niente riga, niente regola)
+// $config['smistamento_spam_default'] = ['active' => true, 'threshold' => '0.40', 'trash_threshold' => '0.80', 'action' => 'trash'];
+//   active = interruttore; threshold = Soglia Spam; trash_threshold = Soglia Cestino (deve essere più alta);
+//   action = 'trash' (Sposta nel Cestino) | 'discard' (Elimina definitivamente). Valori da '0.10' a '0.95'.
 ```
 
 Le altre chiavi (`smistamento_label_map`, orari del digest, …) sono in `config.inc.php.dist` del plugin,
-con i default già giusti. Non copiare `config.inc.php.dist` come `config.inc.php` se non serve.
+con i default già giusti. Lo spam usa la cartella Spam e il Cestino speciali di Roundcube (`junk_mbox`,
+`trash_mbox`): se l'utente non ha una cartella Spam, la riga Spam non compare. Non copiare `config.inc.php.dist` come `config.inc.php` se non serve.
 
 Controllo sintassi:
 
@@ -282,6 +296,10 @@ Con un utente reale (chiedi all'umano di fare il login, o usa `<test-user>`):
    `smistamento` **non** compare. Se la lista è vuota con un solo «>», il plugin managesieve non si
    connette: ricontrolla `managesieve_host` (porta dentro l'host) e il passo 6.
 4. Nella lista cartelle, la cartella attivata ha il segno ↻.
+5. **Spam**, stessa pagina sotto le cartelle: interruttore «Lo smistamento gestisce lo spam» acceso, riga
+   Spam con «Soglia Spam» 0,40, «Soglia Cestino» 0,80 e «Sposta nel Cestino» scelto. Prova a mettere la
+   Soglia Spam uguale o più alta della Soglia Cestino e Salva: la pagina non salva e dice «La soglia Spam
+   deve essere più bassa della soglia Cestino.». Rimetti 0,40 / 0,80 e Salva.
 
 ### Passo 9: test di consegna (solo `<test-user>`)
 
@@ -297,8 +315,22 @@ printf 'From: Persona <persona@example.org>\nTo: <test-user>\nSubject: Prova per
 sudo doveadm fetch -u <test-user> 'mailbox hdr.subject' HEADER Subject 'Prova '
 ```
 
-Atteso: «Prova smistamento» in `Feed`, «Prova persone» in `INBOX`. Le due mail di prova restano: non
-cancellarle tu, dillo all'umano.
+Atteso: «Prova smistamento» in `Feed`, «Prova persone» in `INBOX`.
+
+Spam (con l'interruttore acceso e le soglie di default 0,40 / 0,80 della `<test-user>`):
+
+```bash
+printf 'From: Spam <spam@example.org>\nTo: <test-user>\nSubject: Prova spam medio\nMessage-ID: <smistamento-test-s5-%s@example.org>\nX-Laya-Box: Junk\nX-Laya-Box-Conf: 0.50\n\nProva.\n' "$(date +%s)" \
+  | sudo "$LDA" -d <test-user>
+printf 'From: Spam <spam@example.org>\nTo: <test-user>\nSubject: Prova spam alto\nMessage-ID: <smistamento-test-s9-%s@example.org>\nX-Laya-Box: Junk\nX-Laya-Box-Conf: 0.90\n\nProva.\n' "$(date +%s)" \
+  | sudo "$LDA" -d <test-user>
+sudo doveadm fetch -u <test-user> 'mailbox hdr.subject' HEADER Subject 'Prova spam'
+```
+
+Atteso: Junk 0,5 → «Prova spam medio» nella cartella Spam (`Junk`, o il nome della cartella Spam
+dell'utente); Junk 0,9 → «Prova spam alto» nel Cestino (`Trash`, o il nome del Cestino dell'utente).
+Se l'utente ha scelto «Elimina definitivamente», la 0,9 non c'è più: per il test lascia «Sposta nel
+Cestino». Le mail di prova restano: non cancellarle tu, dillo all'umano.
 
 Digest, prova a secco (non salva niente):
 
@@ -312,7 +344,7 @@ Export classi, prova:
 
 ```bash
 sudo /usr/local/sbin/smistamento-server.py classes --user <test-user> --out-dir /tmp/smistamento-classes-test
-cat /tmp/smistamento-classes-test/*.json     # prima classe: INBOX, "role": "inbox", "label": "Imbox"
+cat /tmp/smistamento-classes-test/*.json     # prima classe: INBOX, "role": "inbox", "label": "Imbox"; poi, con l'interruttore spam acceso, "role": "spam", "label": "Junk"
 ```
 
 ### Passo 10: rollback (solo se qualcosa non va o se l'umano lo chiede)
@@ -333,5 +365,5 @@ Gli script `smistamento` già scritti nelle home degli utenti **restano**: senza
 ### Rapporto finale per l'umano
 
 Scrivi: valori dei segnaposto usati, percorso del backup, file modificati/creati, diff di `doveconf -n`,
-output di `ss -ltnp | grep 4190`, esito dei passi 8 e 9, eventuali domande aperte. Ricorda che Laya
+output di `ss -ltnp | grep 4190`, esito dei passi 8 e 9 (spam compreso), eventuali domande aperte. Ricorda che Laya
 (scrittura degli header `X-Laya-Box`) non è installata: finché non c'è, le mail restano in Posta in arrivo.

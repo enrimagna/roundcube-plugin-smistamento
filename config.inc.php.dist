@@ -40,6 +40,23 @@ $config['smistamento_label_auto'] = true;
 // so Laya keeps learning «resta in Posta in arrivo». Compared case-insensitively.
 $config['smistamento_inbox_labels'] = ['Imbox'];
 
+// Laya's spam class. Mail with one of these labels is handled by the fixed «Spam» row in
+// Settings > Smistamento (the special Junk folder), with two thresholds per user:
+//   confidence < Spam threshold                     -> stays in the Inbox;
+//   Spam threshold <= confidence < Cestino threshold -> the Junk folder (the user checks it; Laya trains on it);
+//   confidence >= Cestino threshold                 -> the user's action (Trash, or delete right away);
+//   no confidence                                   -> the Junk folder.
+// The general smistamento_min_conf does not apply to it. [] = no spam class: no row, no rule.
+$config['smistamento_spam_labels'] = ['Junk'];
+
+// Defaults for users who never saved the page. active = the switch «Lo smistamento gestisce lo spam»
+// (off: no Spam row, no spam rule, the mail stays in the Inbox; thresholds and action are kept).
+// threshold = Spam threshold, trash_threshold = Cestino threshold: '0.10'..'0.95' (two decimals),
+// threshold lower than trash_threshold. action: 'trash' (Sposta nel Cestino) | 'discard' (Elimina definitivamente).
+// Settings saved by older versions (one threshold) are read as: old threshold = Spam threshold,
+// Cestino threshold = 0.80 or the old value if higher (then the Spam threshold goes 0.05 lower).
+$config['smistamento_spam_default'] = ['active' => true, 'threshold' => '0.40', 'trash_threshold' => '0.80', 'action' => 'trash'];
+
 // ---------------------------------------------------------------------------------------------
 // ManageSieve (where the "smistamento" script goes)
 // ---------------------------------------------------------------------------------------------

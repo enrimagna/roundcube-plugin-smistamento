@@ -37,7 +37,7 @@ Le classi le decide l'utente, non il modello. Sono il file che `smistamento-serv
 
 Niente uscite fisse, niente mappatura a mano su un elenco comune. Un utente può avere Feed, Fatture, Paper Trail, Viaggi; un altro cartelle diverse. Accendere o spegnere una cartella in Impostazioni › Smistamento cambia le classi alla prossima esportazione.
 
-Junk non è una classe di Laya. Spam e bulk li ferma il server (postscreen, Spamhaus, MalwareBazaar → Junk). Il plugin non lascia mai attivare Junk, Spam, Cestino, Bozze o Inviata, quindi non finiscono mai nel file `classes`.
+Junk è una classe di Laya se la sua etichetta è configurata (`smistamento_spam_labels`, default `Junk`) e l'utente lascia acceso «Lo smistamento gestisce lo spam» (US-SMI-SPAM in SPEC-DELTA-LAYA). In quel caso il file `classes` la porta subito dopo Posta in arrivo, con `"role": "spam"` e la cartella Spam speciale come `mailbox`; se l'utente spegne l'interruttore la classe sparisce dal suo file. Laya scrive la confidenza come per le altre classi; cosa farne lo decidono le due soglie dell'utente nello script Sieve, non Laya: sotto la soglia Spam (default 0,40) resta in Posta in arrivo, tra la soglia Spam e la soglia Cestino (default 0,80) va nella cartella Spam, dove l'utente la controlla e da dove Laya impara, dalla soglia Cestino in su va nel Cestino o viene eliminata. Lo spam grosso continua a fermarlo il server prima di Laya (postscreen, Spamhaus, MalwareBazaar). Cestino, Bozze e Inviata non sono mai classi.
 
 Niente Screener. Niente `screened.json`. Il mittente sconosciuto va in una delle classi dell'utente, o resta in Posta in arrivo; non c'è una coda umana.
 

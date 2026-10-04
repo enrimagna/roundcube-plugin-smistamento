@@ -33,6 +33,23 @@ ManageSieve. Dovecot lo esegue **dopo** i filtri dell'utente. Lo script fa `file
   c'è una cartella apposta e non c'è niente da attivare: lo script Sieve fa `stop` su queste etichette
   prima di ogni altra regola, a qualsiasi confidenza. Una cartella chiamata «Imbox» è una cartella come
   le altre e non riceve mai queste etichette.
+- **Spam** (la classe spam di Laya, etichetta `Junk`, configurabile con `smistamento_spam_labels`):
+  sotto la tabella c'è l'interruttore «Lo smistamento gestisce lo spam», acceso di default. Se è acceso
+  compare la riga fissa della cartella Spam speciale, senza «Segna come lette» né «Digest», con:
+  - **Soglia Spam** (default 0,40) e **Soglia Cestino** (default 0,80), da 0,10 a 0,95 a passi di
+    0,05; la soglia Spam deve essere più bassa della soglia Cestino, altrimenti il salvataggio si ferma
+    con «La soglia Spam deve essere più bassa della soglia Cestino.». La soglia generale
+    `smistamento_min_conf` qui non vale;
+  - **Dalla soglia Cestino in su**: «Sposta nel Cestino» (default) o «Elimina definitivamente: la mail
+    viene cancellata subito e non si può recuperare.» (Sieve `discard`).
+
+  Confidenza sotto la soglia Spam → resta in Posta in arrivo; dalla soglia Spam fino a sotto la soglia
+  Cestino → cartella Spam (l'utente la controlla, e Laya ci si allena); dalla soglia Cestino in su →
+  l'azione scelta; senza confidenza → cartella Spam. Se l'interruttore è spento la riga è nascosta, lo
+  script non ha nessuna regola spam e la mail resta in Posta in arrivo; soglie e azione restano salvate.
+  Default in `smistamento_spam_default`. Le impostazioni salvate con una sola soglia (versioni
+  precedenti) si leggono così: la vecchia soglia diventa la soglia Spam, la soglia Cestino è 0,80 (o
+  la vecchia soglia, se è più alta; in quel caso la soglia Spam scende di 0,05).
 - Una riga di aiuto: «Posta in arrivo: le mail delle persone e quelle di cui lo smistamento non è
   sicuro (o tutte, se è fermo).»
 - «Smistamento aggiornato sabato 3 ottobre» viene dalla data di modifica del file della testa
@@ -52,10 +69,12 @@ ManageSieve. Dovecot lo esegue **dopo** i filtri dell'utente. Lo script fa `file
    non lo sono mai (SPECIAL-USE, cartelle speciali di Roundcube e nomi comuni).
 2. Senza header, con confidenza mancante o sotto `smistamento_min_conf`, o con un'etichetta di una
    cartella spenta o inesistente, la mail resta in Posta in arrivo.
-3. Una mail con `X-Spam-Flag: YES` o `X-Malware-Bazaar: hit` non viene mai smistata da Smistamento.
+3. Una mail con `X-Spam-Flag: YES` o `X-Malware-Bazaar: hit` non viene mai smistata da Smistamento,
+   nemmeno dalla riga Spam: lo spam segnato dal server lo gestisce il server (il flag è un sì/no senza
+   confidenza, e Cestino o eliminazione renderebbero irrecuperabili i suoi falsi positivi).
 4. **Vincono i filtri dell'utente.** Pigeonhole esegue lo script `after` solo se lo script personale ha
    lasciato la mail in INBOX (keep implicito). Se un filtro fa `fileinto`, Smistamento non tocca la mail
-   (provato: vedi `testenv/smistamento/seed_laya.py`).
+   (provato in un ambiente di prova con Dovecot 2.4.2).
 5. Il digest elenca solo le mail che Smistamento ha messo nella cartella (etichetta corrispondente) e
    che sono ancora lì. Le mail spostate in Spam o nel Cestino spariscono dal digest da sole. Posta
    in arrivo (quindi le mail delle persone), Spam e Cestino non compaiono mai. Un periodo senza mail non produce nessun digest. Le cartelle con la
@@ -72,6 +91,9 @@ ManageSieve. Dovecot lo esegue **dopo** i filtri dell'utente. Lo script fa `file
   lato Laya, fuori da qui. La prima
   classe è sempre Posta in arrivo, fissa, anche senza cartelle attive:
   `{"mailbox": "INBOX", "path": "INBOX", "role": "inbox", "label": "Imbox", "accepts": ["Imbox"]}`.
+  Se l'utente lascia acceso «Lo smistamento gestisce lo spam», segue la classe spam:
+  `{"mailbox": "Junk", "path": "Junk", "role": "spam", "label": "Junk", "accepts": ["Junk"]}` (la
+  cartella Spam speciale dell'utente). Con l'interruttore spento non c'è.
   Seguono le cartelle attive con `"role": "folder"`. Così Laya ha sempre la classe «resta in Posta in
   arrivo»: una mail che l'utente riporta in Posta in arrivo vale come etichetta `Imbox`.
   La testa di Laya è per utente (`768 → N`) e le sue uscite sono queste classi, in quest'ordine:
@@ -185,6 +207,20 @@ the user's own filters. Each rule does `fileinto` and `stop`.
   `smistamento_inbox_labels`) stays in the Inbox, unread, and is never in a digest. There is no people
   folder and no switch: the Sieve script `stop`s on these labels before any other rule, at any
   confidence. A folder named «Imbox» is an ordinary folder and never receives these labels.
+- **Spam** (Laya's spam class, label `Junk`, configurable via `smistamento_spam_labels`): below the
+  table, a «Sorting handles spam» switch, on by default. When on, a fixed row for the special Junk
+  folder (no Mark as read, no Digest) offers two thresholds, **Spam threshold** (default 0.40) and
+  **Trash threshold** (default 0.80), 0.10–0.95 in steps of 0.05, the Spam one lower than the Trash one
+  (otherwise saving stops with «The Spam threshold must be lower than the Trash threshold.»; the general
+  `smistamento_min_conf` does not apply), and an action **at or above the Trash threshold**: «Move to
+  Trash» (default) or «Delete permanently» (Sieve `discard`). Below the Spam threshold the mail stays in
+  the Inbox; from the Spam threshold to below the Trash threshold it goes to Junk (the user can check it,
+  and Laya trains on it); without a confidence it goes to Junk. When the switch is off the row is hidden,
+  the script has no spam rule, the mail stays in the Inbox, and the saved thresholds and action are kept.
+  Defaults: `smistamento_spam_default`. Settings saved with a single threshold (older versions) are read
+  as: old threshold = Spam threshold, Trash threshold 0.80 (or the old value if higher; then the Spam
+  threshold goes 0.05 lower).
+  Server-flagged spam (`X-Spam-Flag`, malware) never goes through this row.
 - One help line about the Inbox, and a «Sorting updated <day>» line taken from the mtime of the user's
   head file (or «basic sorting» if there is no file; no line if no path is configured).
 - ↻ after active folders. The folder-menu entry appears on active folders only.
@@ -204,7 +240,8 @@ the user's own filters. Each rule does `fileinto` and `stop`.
 The settings live in the user's prefs and in the user's own Sieve script, with a JSON line that also
 carries the accepted labels, digest settings, language and timezone. The `classes` export writes one
 file per user (keyed by full address) for Laya's weekly training, which runs on the mail server on Monday night (Laya side). Its first class is always the
-fixed Inbox class (`"mailbox": "INBOX", "role": "inbox", "label": "Imbox"`), then the active folders
+fixed Inbox class (`"mailbox": "INBOX", "role": "inbox", "label": "Imbox"`), then, while the user lets
+Smistamento handle spam, the spam class (`"mailbox": "Junk", "role": "spam", "label": "Junk"`), then the active folders
 (`"role": "folder"`), so Laya always learns «keep in the Inbox». Laya's head is per user (`768 → N`), its outputs are exactly these classes in this order, and
 `X-Laya-Box` carries one of their `label`s. The head file and the digest
 state are per user too. Tested with two users.
