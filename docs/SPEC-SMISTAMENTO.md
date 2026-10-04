@@ -88,7 +88,7 @@ Sotto l'intestazione (DA / A / DATA), sopra «Intestazioni · Scarica tutti gli 
 6. *(Proposta)* Spam e mail già spostate dai filtri dell'utente (managesieve) non passano dal classificatore: i filtri dell'utente hanno la precedenza.
 7. *(Proposta)* Spegnere una cartella non sposta indietro nulla: le mail già smistate restano dove sono.
 8. Non si possono attivare: Posta in arrivo, Bozze, Inviata, Spam, Cestino.
-9. Le mail delle persone (classe «persone» di Laya, `X-Laya-Box: Imbox`) restano in Posta in arrivo, mai spostate, da leggere, mai nel digest. Non c'è una cartella Imbox. Riga di aiuto in Impostazioni: «Posta in arrivo: le mail delle persone e quelle di cui lo smistamento non è sicuro (o tutte, se è fermo).» Per l'addestramento Posta in arrivo è una classe fissa (vedi README del plugin, export `classes`). *(Deciso da Enrico il 2026-10-04.)*
+9. Le mail delle persone (classe «persone» di Laya, `X-Laya-Box: Imbox`) restano in Posta in arrivo, mai spostate, da leggere, mai nel digest. Non c'è una cartella Imbox. Riga di aiuto in Impostazioni: «Posta in arrivo: le mail delle persone e quelle di cui lo smistamento non è sicuro (o tutte, se è fermo).» Per l'addestramento Posta in arrivo è una classe fissa (vedi README del plugin, export `classes`). *(Deciso il 2026-10-04.)*
 
 ## 7. Note tecniche da verificare
 I nomi di hook, container e keyword sotto sono indicativi: vanno verificati sul codice di Roundcube 1.7.4.
