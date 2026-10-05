@@ -4,7 +4,9 @@ For implementation and operations. Version 3, 5 Oct 2026: the owner's decisions 
 the 08:07 correction (no shadow mode) (§0) applied, Pigeonhole 2.4.2 behaviour verified (§1.4), code written and tested in a test environment (§2.7).
 Version 3 fixes the QA findings (§2.7 «QA fixes»): `laya` now runs **first** among the before-scripts (A3), heads are
 **no longer pickle/joblib** but the data-only pair `<address>.npz` + `<address>.json` (`laya-head-v2`, §3.2), and the
-«not worse than the head in use» gate can no longer be skipped.
+«not worse than the head in use» gate can no longer be skipped. Version 3.1 (5 Oct 2026, 08:56): check 11 now
+also requires the candidate files to sit **directly inside** `/var/lib/laya/candidates` (realpath, no symlinks out
+of it; §3.2), `laya-monday.sh` / `laya-install.sh` stage candidates there, and the unit and cron set `TZ`.
 
 Based on SPEC-LAYA, SPEC-DELTA-LAYA (wins where the specs disagree), SPEC-SMISTAMENTO, the mail-server spec and QA notes (not published),
 the plugin (this repository: README, `config.inc.php.dist`, `lib/smistamento_core.php`,
@@ -327,6 +329,8 @@ RuntimeDirectory=laya
 RuntimeDirectoryMode=0755
 # the encoder is a local directory: never reach the Hugging Face hub (PrivateNetwork=yes anyway)
 Environment=HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+# log timestamps in local time even if the host clock is UTC (drop it if the system zone is already right)
+Environment=TZ=Europe/Rome
 ExecStart=/opt/laya/venv/bin/python /opt/laya/serve/laya-serve.py \
   --socket /run/laya/laya.sock --socket-group vmail --socket-mode 0660 \
   --encoder /opt/laya/encoder/laya-multilingual --heads /laya/heads --users /etc/laya/users.conf \
@@ -365,7 +369,7 @@ Package `laya/` (not published yet):
 | `sieve/laya.sieve`, `dovecot/90-laya.conf` | §1.2 |
 | `etc/users.conf.example`, `etc/filter.conf.example` | `/etc/laya/` |
 | `systemd/laya-serve.service` | §2.6 |
-| `tests/test_laya.py` | 34 unit/integration tests (filter against a fake server; serve `--stub`; check-head incl. 22 broken heads and the pickle test; rollback) |
+| `tests/test_laya.py` | 43 unit/integration tests (filter against a fake server; serve `--stub`; check-head incl. 22 broken heads, the pickle test and 9 check-11 location tests; rollback); also pass as root |
 | test environment | not published: `deploy.sh`, `make-heads.sh`, `verify.py`, Pigeonhole probes |
 
 Requirements: laya-filter = Python ≥ 3.9 stdlib only. laya-serve and laya-check-head = Python ≥ 3.9 + `numpy`
@@ -380,7 +384,11 @@ heads; the test config defines bazaar **before** laya on purpose. **33/33 PASS**
   order, junk, path, encoder, preproc, user, gate, < 200, report lies, 0 bytes); nothing installed.
 - C1p: pickle-bearing candidates refused by check-head **run as root** and never executed (control: the same
   file through `pickle.load` does run the payload).
-- C1c: candidate in a world-writable directory → FAIL 11.
+- C1c: candidate in a world-writable directory → FAIL 11. Version 3.1: `verify.py` stages every candidate in
+  `/var/lib/laya/candidates`, C1c points `--candidates-dir` at a world-writable directory (→ FAIL 11, must be
+  root-owned) and the new C1r checks a candidate in `/root/qa-r2` and symlinks from the candidates directory to
+  it (→ FAIL 11, nothing installed). Not re-run in full (it resets the heads directory); the same three cases ran in the test
+  environment's laya-serve container with a re-check script (no install): FAIL 11, FAIL 11, OK 11.
 - C1b: 11/11 OK and installed for both users (first install, from `/var/lib/laya/candidates`).
 - C2: re-install keeps the `.prev` pair with its old date; archive names `YYYYMMDD-HHMMSS`.
 - C1g: worse candidate whose report says `val_error_old: null` while a head is in use → FAIL 10 (old error
@@ -452,7 +460,7 @@ needs the history's embeddings: the owner copies it once (Decision 6, §3.5).
 | 8 | `preproc` == `laya_text.PREPROC_VERSION` of the deployed `laya_text.py` (`laya-text-v1`) | train and inference text must be identical |
 | 9 | `user` == the address in the file name == the Dovecot username (full address) | `smistamento_head_file = '/laya/heads/%u.json'`; in a test setup it may be a short name (`user`), in production `user@example.org` |
 | 10 | `report.json`: `exit == 0`, `n_train + n_val ≥ 200`; the validation gate, **recomputed** on `<address>.val.npz` (below) | SPEC-LAYA minimum of 200; accept rule «not worse than the head in use», which can no longer be skipped (QA version 2) |
-| 11 | files non-empty, regular files (no symlinks), within size limits; run as root, each file **and its directory** owned by root and not group/other-writable | `laya-serve` treats a 0-byte `.json` as «no head» (a 0-byte placeholder file is not a head). Root-only location = defence in depth: nobody else can swap a file between check and install |
+| 11 | the `.npz`, `.json` and the `.report.json` / `.val.npz` read next to them: `os.path.realpath` of each is **directly inside** `realpath(/var/lib/laya/candidates)` (no sub-directory, no `..`); no symlinks (a symlink from the candidates directory to anywhere else, or a symlinked candidates directory, = FAIL); files non-empty, regular, within size limits; run as root, each file **and the directory** owned by root and not group/other-writable. The files are opened relative to the directory (`openat`, `O_NOFOLLOW`) and the root-only test is repeated on the open descriptors. `--candidates-dir` changes the directory **for tests only** (unit tests, box runs); there is no environment variable or config override, and as root the directory it names must pass the same root-only test | `laya-serve` treats a 0-byte `.json` as «no head» (a 0-byte placeholder file is not a head). One root-only place = defence in depth: nobody else can swap a file between check and install, and a candidate left elsewhere (a home, `/tmp`, `/root/qa-r2`) is never installed by mistake |
 
 **Format `laya-head-v2`** (`laya_head.py`, Decision version 3; a format that cannot carry code):
 
@@ -465,7 +473,7 @@ needs the history's embeddings: the owner copies it once (Decision 6, §3.5).
 The `.json` is the **commit file**: it is renamed last, names the exact `.npz` bytes, and its mtime is the plugin's
 «Smistamento aggiornato» date (`smistamento_head_file = '/laya/heads/%u.json'`).
 
-Check script: `laya/laya-check-head.py` (Python + numpy, no joblib), written and tested in a test environment (§2.7, C1a/C1p/C1c/C1b/C2/C1g).
+Check script: `laya/laya-check-head.py` (Python + numpy, no joblib), written and tested in a test environment (§2.7, C1a/C1p/C1c/C1b/C2/C1g; check 11 location: unit tests `CheckHeadLocation` and a re-check in the test environment).
 It runs 1–11 and prints one `OK`/`FAIL` line per check. Exit 0 = OK; 1 = a check failed, nothing installed;
 2 = usage or I/O error. Each file is read **once** into memory; the bytes that passed the checks are the bytes it
 installs. Details as implemented:
@@ -508,7 +516,7 @@ installs. Details as implemented:
 | `/usr/local/lib/dovecot/sieve-filter/laya-filter` | root, 0755 | the only file in that directory |
 | `/laya/heads/<address>.json` + `<address>.npz` | root:root 0644, directory root 0755 | the head in use; the `.json` mtime = «Smistamento aggiornato» |
 | `/laya/heads/<address>.json.prev` + `.npz.prev` | same | previous head (SPEC-LAYA rollback); gone after a rollback |
-| `/var/lib/laya/candidates/` | root 0700, files root 0600 | candidates copied here before the install (check 11 refuses other places when run as root) |
+| `/var/lib/laya/candidates/` | root 0700, files root 0600 (real files, not symlinks) | candidates copied here before the install; check 11 refuses any other place (realpath directly inside, §3.2) |
 | `/var/lib/laya/heads-archive/<address>/YYYYMMDD-HHMMSS.{npz,json,report.json}` | root 0600 / dir 0700 | every installed head + its report; keep 8 (Decision). **Naming decided in version 3: `YYYYMMDD-HHMMSS`** (seconds, not `HHMM`: two installs in the same minute, e.g. a re-install after a fix, must not collide). Rolled-back heads: `bad-YYYYMMDD-HHMMSS.{npz,json}` (§10) |
 | `/var/lib/laya/{train,emb-cache,emb}` | 0700 (train, emb-cache: root; emb: laya) | training work (the Monday candidates), embedding cache, delivery archive (§2.5, files 0600) |
 | `/etc/laya/users.conf` | root:laya 0640 | `active` / `off` per address (laya-serve reads it through its group; vmail cannot) |
@@ -635,8 +643,12 @@ Follow `INSTALL-AGENT.md` and README «Installazione», «Server». In short:
 ```
 */15 * * * *  root  /usr/local/sbin/smistamento-server.py digest --all-users --base-url https://webmail.example.org/
 0 3 * * 1     root  /usr/local/sbin/smistamento-server.py classes --all-users --out-dir /var/lib/smistamento/classes
-30 3 * * 1    root  nice -n 19 ionice -c3 /opt/laya/training/laya-monday.sh >> /var/log/laya/monday.log 2>&1
+30 3 * * 1    root  TZ=Europe/Rome nice -n 19 ionice -c3 /opt/laya/training/laya-monday.sh >> /var/log/laya/monday.log 2>&1
 ```
+
+`TZ=Europe/Rome` (in the command, and `Environment=TZ=` in the laya-serve unit) only sets the job's environment so
+its log lines are in local time even on a UTC host; the schedule follows the system zone. Not needed when the
+system zone is already Europe/Rome.
 
 The 03:30 line only goes in at rollout phase 2 (§8).
 
@@ -673,7 +685,8 @@ On **the mail server** (Decision 1: the Monday incremental training; the first t
 use). On top of the guide (Decision), the install step is `laya-check-head.py --install` instead of
 `laya-install.sh`: checks 1–11 (gate recomputed on `$WORK/<address>.val.npz`), then the atomic install with the
 `.prev` pair and the copy into `heads-archive`. **Done (version 3):** `laya-monday.sh` calls check-head directly
-(candidates in `/var/lib/laya/train`, root 0700) and deletes `<address>.jsonl` and `<address>.val.npz` after each
+(candidates written to `/var/lib/laya/train`, root 0700; version 3.1: the four files are copied into
+`/var/lib/laya/candidates` before check-head and removed after it, since check 11 accepts no other place) and deletes `<address>.jsonl` and `<address>.val.npz` after each
 user. `laya-serve` picks up the new head through the mtime. Log: `/var/log/laya/monday.log`
 (logrotate weekly).
 
@@ -738,7 +751,7 @@ Files and ops (C):
 
 - [ ] C1 `laya-check-head.py` OK for every installed user; `labels` = today's `classes` file; a broken head (wrong label order, NaN, wrong encoder, report exit 2, 0 bytes) → `FAIL`, exit 1, head in use untouched
 - [ ] C1p a pickle-bearing candidate (old `.joblib`, raw pickle renamed `.npz`, npz with an object array or an extra member) run through check-head **as root** → `FAIL`, payload never executed; the same as a head in `/laya/heads` → laya-serve `bad_head`, payload never executed
-- [ ] C1g with a head in use, a worse candidate whose report says `val_error_old: null` → `FAIL 10`; a candidate outside a root-only directory → `FAIL 11`
+- [ ] C1g with a head in use, a worse candidate whose report says `val_error_old: null` → `FAIL 10`; a candidate outside `/var/lib/laya/candidates` (e.g. `/root/qa-r2`) or a symlink from it to elsewhere → `FAIL 11`
 - [ ] C2 install → plugin shows «Smistamento aggiornato <today>» without restarting anything; `laya-serve` uses the new head (log)
 - [ ] C3 `laya-rollback.sh` → old head back, plugin shows the old date, `laya-serve` reloads; no `.prev` and no `*.bad.*` left in `/laya/heads`; refused pair in `heads-archive/<address>/bad-*`
 - [ ] C4 permissions as in §3.3 (`users.conf` root:laya 0640; `filter.conf` and the global Sieve scripts root 0644; candidates/heads-archive root 0700); `/run/laya/laya.sock` 0660 laya:vmail; 4190 not public
