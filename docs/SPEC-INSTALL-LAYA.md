@@ -13,7 +13,7 @@ spec: nobody has inspected the trained files yet. The numbers that count are the
 
 ---
 
-## 0. Owner decisions (project owner, 5 Oct 2026 07:46, corrected 08:07): they override the rest of this spec
+## 0. Owner decisions (project owner, 5 Oct 2026 07:46, corrected 08:07, cache 08:12): they override the rest of this spec
 
 | # | Decision | Applied in |
 |---|---|---|
@@ -22,6 +22,7 @@ spec: nobody has inspected the trained files yet. The numbers that count are the
 | 3 | Mail **between local users is not classified**. «Local» is defined in §1.5, together with how `laya-filter` detects it. | §1.5, §11.8; closes Open §12.6 |
 | 4 | ~~Shadow mode on real mail after the MX cutover, no copy of incoming mail.~~ **Replaced by decision 5.** | — |
 | 5 | **Correction, 5 Oct 08:07: no shadow mode at all.** From day one Laya moves mail at once for every user who has a head and agreed (`active`). The shadow phase, the `shadow` mode and the `X-Laya-Shadow-*` headers are gone from rollout, code, config and tests. Per-user activation/consent and the fallback without headers stay. Real mail reaches the mail server only after the MX cutover; nothing copies incoming mail. | §7, §8, §9, §10; closes Open §12.5 |
+| 6 | **Embedding cache (08:12):** the owner copies the training PC's embedding cache to the mail server **once, himself**, so the first Monday run does not recompute the history. | §3.5, §8 phase 2; closes Open §12.11 |
 
 ---
 
@@ -358,9 +359,8 @@ On the mail server, outside the home, installed once (not per user):
 ```
 
 The weekly incremental run is on **the mail server** (§6) and never copies anything back to the training PC. The embedding
-cache from the training PC (`~/laya/emb-cache/<address>.npz|.ids`) is not needed to install a head. The Monday run needs
-the history's embeddings, though: either copy the cache from the training PC once (same encoder fingerprint), or let
-the first Monday run recompute it on the mail server's CPU (hours for the whole history). Open §12.11.
+cache from the training PC (`~/laya/emb-cache/<address>.npz|.ids`) is not needed to install a head, but the Monday run
+needs the history's embeddings: the owner copies it once (Decision 6, §3.5).
 
 ### 3.2 Pre-install checks for the files (run for every user; any failure = don't install that user)
 
@@ -426,8 +426,8 @@ sudo /opt/laya/venv/bin/python /opt/laya/training/laya-check-head.py --user $U \
 ```
 
 Run `smistamento-server.py classes --user $U` first (§4). Rollback stays `laya-rollback.sh`. Afterwards the
-training files in the home can go (`shred -u ~/laya/work/*.jsonl`). If the emb-cache was copied from the training PC,
-move it to `/var/lib/laya/emb-cache` (Open §12.11).
+training files in the home can go (`shred -u ~/laya/work/*.jsonl`). The embedding cache goes to
+`/var/lib/laya/emb-cache` as in §3.5.
 
 Roundcube container: mount the **directory** read-only (`- /laya/heads:/laya/heads:ro`), never the single
 file: a file bind mount stays on the old inode after the atomic rename.
@@ -456,6 +456,45 @@ Fingerprint command (on both machines, must print the same):
 s=u.spec_from_file_location("e","/opt/laya/training/laya-embed.py"); m=u.module_from_spec(s); s.loader.exec_module(m); \
 print(m.encoder_id("/opt/laya/encoder/laya-multilingual"))'
 ```
+
+### 3.5 Embedding cache from the training PC (Decision 6, once, before the first Monday run)
+
+the owner copies the cache that the initial training wrote on the training PC, so `laya-embed.py` on the mail server only
+encodes mails that aren't in it yet.
+
+| What | Value |
+|---|---|
+| Source (the training PC) | `~/laya/emb-cache/<address>.npz` and `<address>.ids`, one pair per user |
+| Destination (the mail server) | `/var/lib/laya/emb-cache/` = `CACHE` default of `laya-monday.sh` and `--cache-dir` default of `laya-embed.py`/`laya-export.py`/`laya-train.py` |
+| File names | `<address>` = the **Dovecot username** (full address), same name as the head (`safe()` rule: only `A-Za-z0-9@._+-`). If the training PC used other names, rename both files |
+| Format | `<address>.npz`: `mid_hash` (`U40`, sha1 of the stripped `Message-ID`), `emb` (float16, N × 768, normalised), `meta` (JSON: `encoder` fingerprint, `preproc`, `dim`). `<address>.ids`: one `mid_hash` per line (laya-export.py skips those mails, so their text isn't re-exported) |
+| Owner / mode | `root:root`, directory 0700, files 0600 (the Monday cron runs as root with `umask 077`). Derived from mail: same privacy class as the training data |
+| Validity | only with the **same encoder fingerprint** (§3.4) and `preproc` `laya-text-v1`: on a mismatch `laya-embed.py` prints «cache di un altro encoder/preproc, la butto» and recomputes everything |
+
+```bash
+# on the mail server, after copying the files (e.g. rsync over SSH) to ~/emb-cache-copy/
+sudo install -d -m 0700 -o root -g root /var/lib/laya/emb-cache
+sudo install -m 0600 -o root -g root ~/emb-cache-copy/*.npz ~/emb-cache-copy/*.ids /var/lib/laya/emb-cache/
+# check: every user with a classes file has a cache the Monday script will use (same lookup as laya-embed.py)
+sudo /opt/laya/venv/bin/python - <<'PY'
+import glob, importlib.util as u, json, os, sys
+sys.path.insert(0, "/opt/laya/training")
+s = u.spec_from_file_location("e", "/opt/laya/training/laya-embed.py"); e = u.module_from_spec(s); s.loader.exec_module(e)
+import laya_text
+enc = e.encoder_id("/opt/laya/encoder/laya-multilingual")
+for cf in sorted(glob.glob("/var/lib/smistamento/classes/*.json")):
+    user = os.path.basename(cf)[:-5]
+    fn = os.path.join("/var/lib/laya/emb-cache", e.safe(user) + ".npz")
+    cache, meta = e.load_cache(fn)
+    ids = sum(1 for _ in open(fn[:-4] + ".ids")) if os.path.exists(fn[:-4] + ".ids") else 0
+    ok = bool(meta) and meta["encoder"] == enc and meta["preproc"] == laya_text.PREPROC_VERSION and meta["dim"] == 768 and ids == len(cache) > 0
+    print("OK  " if ok else "FAIL", user, len(cache), "embeddings,", ids, "ids,", meta)
+PY
+```
+
+`FAIL` = missing file, other encoder/preproc, or `.ids` not matching the `.npz`: fix it before the first Monday
+(otherwise that user's history is recomputed on CPU). The first Monday log must show, per user,
+`N nuovi embedding, M in cache` with N = only the mails since the training.
 
 ---
 
@@ -556,7 +595,7 @@ crosses users.
 |---|---|---|
 | 0 | Plugin, Dovecot after-script, ManageSieve, classes + digest cron, OpenRouter storage (§5). No Laya. Users save their settings. Laya pipeline rehearsed on the test domains only (fallback, forged headers, latency) | QA.md scenarios pass on the mail server's test domain with stub-labelled test mails; QA §9 A1–A8 on the test domain |
 | 1 | **After the MX cutover to the mail server.** Encoder, venv, `laya-serve`, `laya-filter`, `laya.sieve`; heads installed (§3); **every user with a head who agreed is `active` from day one** (decision 5). Recommend «Sposta nel Cestino», not «Elimina», for the first weeks | QA §9 A and B on real mail; latency measured (§2.4); no complaints for a week; the owner confirms or changes the thresholds after the first weeks |
-| 2 | 03:30 cron for `laya-monday.sh`; delivery archive (§2.5) | first Monday: log clean, `report.json` per user, plugin date updated or «resta la vecchia» logged |
+| 2 | Embedding cache copied from the training PC and checked (§3.5), **before** the first run; then the 03:30 cron for `laya-monday.sh`; delivery archive (§2.5) | §3.5 check prints `OK` for every user; first Monday: `laya-embed.py` logs only the new mails as «nuovi embedding» (not the whole history), log clean, `report.json` per user, plugin date updated or «resta la vecchia» logged |
 
 Before the MX cutover, the mail server only receives the test domains (the mail-server spec): real mail, and with it
 real sorting, starts with the cutover. There is **no copy** of incoming mail (no BCC, no parallel feed, no
@@ -641,4 +680,4 @@ Status after version 2 (5 Oct 2026):
 8. **Thresholds**: 0.80 / 0.40 / 0.80 are the plugin defaults. The owner watches the first weeks of active sorting (logs, «Smistata in», the digest) and adjusts; a calibration other than the head's single temperature is not planned.
 9. **Delivery archive**: format decided and implemented (§2.5, one jsonl line with the float16 embedding). The reader in `laya-embed.py` is still to write.
 10. **Consent and privacy** for the other mailboxes (Laya reads content; training material in someone's home). SPEC-SMISTAMENTO §7 «Privacy» is still open.
-11. **NEW: embedding cache for the first Monday run.** Copy the training PC's `emb-cache` to the mail server once (derived from mail, same privacy class as the heads' training data), or let the mail server recompute the whole history on CPU (hours, `nice`)? the owner decides before phase 2.
+11. ~~**Embedding cache for the first Monday run**~~ **Decided** (§0.6): the owner copies the training PC's cache to the mail server once; step and check in §3.5.

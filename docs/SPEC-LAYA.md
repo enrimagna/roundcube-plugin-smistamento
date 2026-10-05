@@ -28,7 +28,7 @@ Un encoder condiviso, una testa per utente.
 | Classi | quelle del suo file `classes`, nello stesso ordine |
 | Nel file | `W`, `b`, temperature, ordine delle etichette |
 
-L'encoder non si riallena. Sul VPS arriva solo il file della testa (con il suo `report.json`).
+L'encoder non si riallena. Sul VPS arrivano il file della testa (con il suo `report.json`) e, una volta sola, la cache degli embedding del primo giro.
 
 Le classi le decide l'utente, non il modello. Sono il file che `smistamento-server.py classes` scrive per lui:
 
@@ -62,7 +62,7 @@ Sieve, dopo, `fileinto` sulla cartella e `stop`. `Imbox` non ha `fileinto`: rest
 
 Due fasi, due macchine.
 
-**Primo giro, una volta sola, sul PC di training** *(decisione del 5 ottobre 2026)*. Lo storico, circa 5 GB, dopo la migrazione dal server precedente: per ogni utente, le mail già presenti nelle sue cartelle attive sono gli esempi di quella classe, e le mail in INBOX quelli di `Imbox`. Il PC di training serve solo a questo: riceve il file `classes` di ogni utente, esportato sul server di posta, e rimanda al server di posta solo la testa e il suo `report.json` (servono ai controlli prima di installarla).
+**Primo giro, una volta sola, sul PC di training** *(decisione del 5 ottobre 2026)*. Lo storico, circa 5 GB, dopo la migrazione dal server precedente: per ogni utente, le mail già presenti nelle sue cartelle attive sono gli esempi di quella classe, e le mail in INBOX quelli di `Imbox`. Il PC di training serve solo a questo: riceve il file `classes` di ogni utente, esportato sul server di posta, e rimanda al server di posta la testa e il suo `report.json` (servono ai controlli prima di installarla). Una volta sola si copia anche la cache degli embedding (`<indirizzo>.npz` e `.ids`) in `/var/lib/laya/emb-cache` sul server di posta, così il primo lunedì non ricodifica lo storico *(decisione del 5 ottobre 2026)*.
 
 **Poi ogni settimana, il lunedì notte, sul server di posta (dove gira Laya): il training incrementale** (le correzioni nuove si aggiungono allo storico, vedi «Lunedì notte»). Niente copie verso il PC di training. L'encoder gira già lì, quindi niente ricodifica.
 
