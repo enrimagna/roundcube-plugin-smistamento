@@ -14,7 +14,7 @@ Internet :25
   Laya legge, scrive gli header, Sieve sposta
 ```
 
-Submission 465 e 587 non ci passano. Niente `content_filter`. Se Laya è giù, la mail resta in INBOX. Mai un 550 sullo score, mai una coda in attesa del modello.
+Submission 465 e 587 non ci passano: la posta tra utenti locali (inviata con autenticazione, o dal server stesso) non si classifica nemmeno alla consegna. Niente `content_filter`. Se Laya è giù, la mail resta in INBOX. Mai un 550 sullo score, mai una coda in attesa del modello.
 
 ## Modello
 
@@ -28,7 +28,7 @@ Un encoder condiviso, una testa per utente.
 | Classi | quelle del suo file `classes`, nello stesso ordine |
 | Nel file | `W`, `b`, temperature, ordine delle etichette |
 
-L'encoder non si riallena. Sul VPS arriva solo il file della testa.
+L'encoder non si riallena. Sul VPS arriva solo il file della testa (con il suo `report.json`).
 
 Le classi le decide l'utente, non il modello. Sono il file che `smistamento-server.py classes` scrive per lui:
 
@@ -62,9 +62,9 @@ Sieve, dopo, `fileinto` sulla cartella e `stop`. `Imbox` non ha `fileinto`: rest
 
 Due fasi, due macchine.
 
-**Primo giro, una volta sola, sul PC di training con GPU.** Lo storico, circa 5 GB, dopo la migrazione dal server precedente: per ogni utente, le mail già presenti nelle sue cartelle attive sono gli esempi di quella classe, e le mail in INBOX quelli di `Imbox`. Il PC di training con GPU serve solo a questo.
+**Primo giro, una volta sola, sul PC di training** *(decisione del 5 ottobre 2026)*. Lo storico, circa 5 GB, dopo la migrazione dal server precedente: per ogni utente, le mail già presenti nelle sue cartelle attive sono gli esempi di quella classe, e le mail in INBOX quelli di `Imbox`. Il PC di training serve solo a questo: riceve il file `classes` di ogni utente, esportato sul server di posta, e rimanda al server di posta solo la testa e il suo `report.json` (servono ai controlli prima di installarla).
 
-**Poi ogni settimana, sul server di posta (dove gira Laya).** Niente copie verso il PC di training con GPU. L'encoder gira già lì, quindi niente ricodifica.
+**Poi ogni settimana, il lunedì notte, sul server di posta (dove gira Laya): il training incrementale** (le correzioni nuove si aggiungono allo storico, vedi «Lunedì notte»). Niente copie verso il PC di training. L'encoder gira già lì, quindi niente ricodifica.
 
 ### Alla consegna
 
