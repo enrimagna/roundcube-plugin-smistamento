@@ -128,4 +128,6 @@ $config['smistamento_llm_test_timeout'] = 15;
 // Path of the user's classifier head file as seen FROM ROUNDCUBE (bind-mount it read-only).
 // %u = username, %l = local part, %d = domain. Its mtime is the date shown.
 // null = no line. Configured but missing file = «Smistamento di base: …».
+// With Laya the head is a pair <address>.json + <address>.npz (no pickle/joblib any more); point this at the
+// .json, the file the install writes last: e.g. '/laya/heads/%u.json'.
 $config['smistamento_head_file'] = null;

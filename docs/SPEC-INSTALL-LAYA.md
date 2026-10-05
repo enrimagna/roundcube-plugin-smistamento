@@ -1,7 +1,10 @@
 # Laya + Smistamento: production install spec
 
-For implementation and operations. Version 2, 5 Oct 2026: the owner's decisions of 5 Oct 07:46 and
+For implementation and operations. Version 3, 5 Oct 2026: the owner's decisions of 5 Oct 07:46 and
 the 08:07 correction (no shadow mode) (§0) applied, Pigeonhole 2.4.2 behaviour verified (§1.4), code written and tested in a test environment (§2.7).
+Version 3 fixes the QA findings (§2.7 «QA fixes»): `laya` now runs **first** among the before-scripts (A3), heads are
+**no longer pickle/joblib** but the data-only pair `<address>.npz` + `<address>.json` (`laya-head-v2`, §3.2), and the
+«not worse than the head in use» gate can no longer be skipped.
 
 Based on SPEC-LAYA, SPEC-DELTA-LAYA (wins where the specs disagree), SPEC-SMISTAMENTO, the mail-server spec and QA notes (not published),
 the plugin (this repository: README, `config.inc.php.dist`, `lib/smistamento_core.php`,
@@ -31,11 +34,12 @@ spec: nobody has inspected the trained files yet. The numbers that count are the
 ```
 Internet :25 → postscreen + Spamhaus → policyd-spf → Postfix → (MalwareBazaar content filter, port 25 only)
   → LMTP → Dovecot 2.4 / Pigeonhole, one Sieve run per recipient:
-      1. before  "bazaar"   (exists: X-Malware-Bazaar: hit → Junk)
-      2. before  "laya"     NEW: strip any X-Laya-* headers, then filter "laya-filter"
+      1. before  "laya"     NEW, precedence 1 = always first: strip any X-Laya-* headers, then filter "laya-filter"
+                            spam/malware flag (X-Spam-Flag, X-Malware-Bazaar)? → strip only, no question, no header
                             laya-filter: local mail (§1.5)? → no question, no header
                             laya-filter ──unix socket──► laya-serve (encoder + per-user heads)
                             ◄── X-Laya-Box / X-Laya-Box-Conf (active user) or nothing (off, no head, local, error)
+      2. before  "bazaar"   (exists, unchanged: X-Malware-Bazaar: hit → fileinto Junk; stop)
       3. personal           the user's filters (Roundcube «Filtri»)
       4. after   "smistamento"  managed by the plugin: fileinto + stop, thresholds per user
   → Maildir
@@ -56,7 +60,9 @@ Training: the first run on **the training PC**, then the Monday incremental run 
 
 **Security, mandatory:** any sender can put `X-Laya-Box: Junk` / `X-Laya-Box-Conf: 0.99` in a mail, and with
 «Elimina definitivamente» that mail would be discarded. The `laya` before-script **always** deletes incoming
-`X-Laya-*` headers first, even when Laya is down.
+`X-Laya-*` headers first, even when Laya is down, and it runs **before every other before-script**: a script that
+files the mail and cancels the keep (bazaar's `fileinto "Junk"; stop;`) ends the whole chain, so a script after it
+never runs (QA A3, version 2: malware mail landed in Junk *with* the forged headers).
 
 ### 1.2 Global Sieve script `laya` (Decision)
 
@@ -64,6 +70,7 @@ Training: the first run on **the training PC**, then the Monday incremental run 
 `.svbin` LMTP logs two errors per delivery because it cannot write next to a global script):
 
 ```sieve
+# Runs FIRST (precedence = 1), before "bazaar" and any other before-script.
 require ["editheader", "vnd.dovecot.filter"];
 # Never trust X-Laya-* from outside: deleted here even when Laya is down or skipped.
 # (deleteheader needs exact names; laya-filter also strips ANY X-Laya-* field.)
@@ -73,6 +80,7 @@ deleteheader "X-Laya-Box-Conf";
 # false, the message stays as it is (already stripped above) and the script goes on. No runtime error.
 if anyof (header :is "X-Spam-Flag" "YES", header :is "X-Malware-Bazaar" "hit") {
   # Server-flagged spam/malware is never sorted by Smistamento: no model, only strip any other X-Laya-* field.
+  # The malware decision still wins: bazaar runs right after this script and files the mail into Junk.
   if filter "laya-filter" ["--strip-only"] {
   }
 } else {
@@ -81,8 +89,8 @@ if anyof (header :is "X-Spam-Flag" "YES", header :is "X-Malware-Bazaar" "hit") {
 }
 ```
 
-Dovecot 2.4 (add to the config of README «Server», **after** the existing bazaar `before` block). This is
-`laya/dovecot/90-laya.conf`, verified on 2.4.2:
+Dovecot 2.4 (add to the config of README «Server»; where the block sits no longer matters, `precedence = 1`
+puts it first). This is `laya/dovecot/90-laya.conf`, verified on 2.4.2:
 
 ```
 sieve_plugins {
@@ -103,13 +111,24 @@ sieve_editheader_header X-Laya-Box {
 sieve_editheader_header X-Laya-Box-Conf {
   forbid_add = yes
 }
-# Before-scripts run in the order they are DEFINED: keep this block AFTER the bazaar one.
+# laya runs FIRST among the before-scripts whatever the order of the blocks: precedence 1 beats the default
+# (infinite) of the bazaar block. laya.sieve never classifies X-Malware-Bazaar / X-Spam-Flag mail (strip only),
+# so bazaar's Junk decision still wins.
 sieve_script laya {
   type = before
   driver = file
   path = /etc/dovecot/sieve/laya.sieve
+  precedence = 1
 }
 ```
+
+**Decision (QA A3): order by precedence, not `deleteheader` in bazaar.** The alternative was to add the two
+`deleteheader` lines to `bazaar.sieve`. Running `laya` first is more robust: it protects against **every**
+before-script that ends the chain (bazaar today, any filter added tomorrow) without touching scripts Laya doesn't
+own, it doesn't depend on the order of the blocks in the config (`precedence` is explicit, a block moved by an
+upgrade or a `conf.d` file doesn't change it), and the stripping code stays in one place. The malware decision is
+unchanged: laya only strips flagged mail and never adds headers to it, then bazaar files it into Junk (test run D3b:
+Junk, no `X-Laya-*`, laya-serve not asked; the test config deliberately defines bazaar *before* laya).
 
 Do **not** add `forbid_delete` for the X-Laya headers: the `laya` script has to delete them.
 
@@ -144,7 +163,7 @@ Evidence: probe scripts, log excerpts and the end-to-end run are in the project 
 
 | # | Question | Result | Evidence |
 |---|---|---|---|
-| a | Order of two `before` scripts | **The order in which the `sieve_script` blocks are defined in the config**, not the name. A `sieve_script_precedence` setting overrides it (lower first); a file driver pointing at a directory runs its `*.sieve` files in byte order of the name. So: put the `laya` block after the `bazaar` block | probe: blocks defined `zz` then `aa` → log `zz sees X-Order=[orig]`, then `aa sees X-Order=[zz]`. Doc: «The storages will be accessed in the order these storages are defined in the configuration, unless the order is overridden by the `sieve_script_precedence` setting» |
+| a | Order of two `before` scripts | **The order in which the `sieve_script` blocks are defined in the config**, not the name. A `sieve_script_precedence` setting (`precedence` inside the block) overrides it (lower first, default infinite); a file driver pointing at a directory runs its `*.sieve` files in byte order of the name. A before-script that cancels the implicit keep (`fileinto …; stop;`) ends the chain. So (version 3): `precedence = 1` in the `laya` block puts it first, before bazaar (test run D3b with bazaar defined first) | probe: blocks defined `zz` then `aa` → log `zz sees X-Order=[orig]`, then `aa sees X-Order=[zz]`. Doc: «The storages will be accessed in the order these storages are defined in the configuration, unless the order is overridden by the `sieve_script_precedence` setting» |
 | b | Are `deleteheader`/`addheader`/`filter` changes in a before-script visible later? | **Yes**: to later before-scripts, the personal script, the after-scripts, **and** they are in the stored mail. An `X-Laya-Box` added by the filter is matched by the plugin's `header :is` rules | probe: `personal sees X-Laya-Box=[Feed] X-Order=[zz]`, `after1 sees X-Laya-Box=[Feed]`, stored mail has `X-Laya-Box: Feed` and no forged value. Test run: D1/D2 (filed into Feed by the real smistamento after-script) |
 | c | Does a failing filter undo earlier edits? | **No**, when `filter` is used as a test. Exit ≠ 0 → test false, message = the version *before* the filter (with the earlier `deleteheader` applied), script continues. As an action the spec allows the whole script to fail with an implicit keep of the **original** message (forged headers back!): that's why `laya.sieve` uses the test form | probe mail 2: `Terminated with non-zero exit code 3`, `aa filter-fail FALSE`, stored mail without X-Laya-Box, with `X-Order: zz`. Spec §6.1/§8 |
 | d | Do the after-scripts run when the user's filter files the mail? | **No**: a personal `fileinto` cancels the implicit keep and the chain stops there. User filters win (B6) | probe mail 3: no `after1` log line. Test run D5 («condominio» → Progetti although the label was Feed) |
@@ -165,11 +184,16 @@ because laya-filter runs at LMTP delivery. The filter therefore checks the sende
      `(Authenticated sender: …)` if `smtpd_sasl_authenticated_header = yes`;
    - `(Postfix, from userid N)` for `sendmail` on the server (cron, the Smistamento digest).
 
-**How laya-filter finds that line.** It reads the `Received` headers from the top. It skips Dovecot's own
-`with LMTP` line and our content filter's re-injection lines (written `by <mta_hosts>`, with the client
-`[127.0.0.1]`/`[::1]` taken from the connection, not from HELO). The next line is the entry line, and it must be
-written `by <one of mta_hosts>` (`mta_hosts = mx.example.org`). It is local only if that line carries one of
-the markers. Lines below the entry line are never read, because anyone can forge them.
+**How laya-filter finds that line.** It reads the `Received` headers from the top and parses each one into its
+`from` / `by` / `with` / `id` / `for` clauses (RFC 5321 §4.4; comments in parentheses are kept apart, so a word
+inside the HELO or a comment can never act as a `by` or `with` clause, QA version 2 item 6). It skips Dovecot's own
+`with LMTP` line and our content filter's re-injection lines (`by <mta_hosts>`, and the `from` clause is exactly a
+HELO followed by **one** comment with the client `[127.0.0.1]`/`[::1]`, which Postfix takes from the connection,
+not from HELO). The next line is the entry line, and its `by` clause must be one of `mta_hosts`
+(`mta_hosts = mx.example.org`). It is local only if that line's `with` clause is `ESMTPSA`/`ESMTPA` (or its `from`
+part carries an `(Authenticated sender: …)` comment, or, for a local pickup without `from` clause, the comment after
+the `by` host is `(Postfix, from userid N)`). Lines below the entry line are never read,
+because anyone can forge them.
 
 **Consequences:**
 
@@ -194,10 +218,8 @@ the markers. Lines below the entry line are never read, because anyone can forge
 | `laya-filter` | small Python stdlib client (`#!/usr/bin/python3 -IS`) run by Pigeonhole per recipient | the mail user (vmail, uid 5000) |
 | socket | `/run/laya/laya.sock`, `laya:vmail`, 0660 (`RuntimeDirectory=laya`, 0755) | |
 
-`laya-serve` imports the **same** `laya_text.py` as training (`--text-module-dir /opt/laya/training`, same
-`PREPROC_VERSION`). The head math is the formula of `laya_head.classify` (§2.3) written out in `laya-serve.py`,
-because the service also needs the embedding for the archive (§2.5). It is unit-tested against the same
-rounding. Code: `laya/` (§2.7).
+`laya-serve` imports the **same** `laya_text.py` and `laya_head.py` as training (`--text-module-dir
+/opt/laya/training`, same `PREPROC_VERSION`, same strict head loader and `laya_head.classify`). Code: `laya/` (§2.7).
 
 ### 2.2 Protocol (Decision)
 
@@ -205,8 +227,23 @@ Request: one JSON line, then the raw message bytes (laya-filter sends the **alre
 the first 256 KB):
 
 ```
-{"v":1,"user":"user@example.org","size":48211}\n<48211 bytes>
+{"v":1,"user":"user@example.org","size":48211,"deadline":1791182046.512}\n<48211 bytes>
 ```
+
+then laya-filter half-closes its side (`shutdown(SHUT_WR)`). Version 3 (QA items 4–6):
+
+- `deadline` (unix time, optional) = when laya-filter gives up (its 5 s budget). laya-serve **skips** a request
+  whose deadline has passed, or whose client has already closed the connection (e.g. after a pause, or a
+  backlog of deliveries behind a slow encoding): before reading the head, before and after encoding. Skipped =
+  no encoding, no decision line, no reply, no traceback; one info line `skipped, the client already gave up (…)`.
+  A client that disappears while the reply is written (`BrokenPipeError`) is logged the same way.
+- laya-serve reads **exactly** `size` bytes (at most 8 MB announced). A shorter body (end of stream before
+  `size`) → `bad_request` at once, logged `short body`, **never classified**. No 3 s wait: the half-close marks
+  the end.
+- `ms=` in the decision line is the encoding time only.
+- Listen backlog 64 (`request_queue_size`), so the LMTP deliveries waiting while one mail is encoded don't hit a
+  full queue. If it is full anyway (`BlockingIOError`/`EAGAIN` on `connect`), laya-filter retries every 50 ms
+  within its budget, then falls back with `TimeoutError: laya-serve busy`.
 
 Reply: one JSON line:
 
@@ -234,10 +271,12 @@ X-Laya-Box: labels[k]          X-Laya-Box-Conf: floor(p[k]·100)/100 formatted "
   passes a threshold it didn't reach.
 - `labels[k]` is written exactly as stored in the head (= the `label` field of the user's `classes` file).
 - Classes "muted" in the head (W = 0, b = −30) are never chosen in practice.
-- Head reload: `stat` of `/laya/heads/<address>.joblib` on every request; reload when mtime, size or inode
-  change (install and rollback need no restart). A 0-byte file is «no head». At load, laya-serve rechecks
-  format, shapes, finite values, `preproc` and the encoder fingerprint; a refused head gives `bad_head` or
-  `encoder_mismatch` and is logged once.
+- Head reload: `stat` of `/laya/heads/<address>.json` and `<address>.npz` on every request; reload when mtime,
+  size or inode of either changes (install and rollback need no restart). A missing or 0-byte `.json` is «no
+  head». Loading uses the strict loader of `laya_head.py` (§3.2 check 1: no pickle, `allow_pickle=False`,
+  strict JSON, `weights_sha256`); a refused head gives `bad_head` or `encoder_mismatch` and is logged once. A
+  pair caught half-way through an install (new `.npz`, old `.json`: the sha256 doesn't match) keeps the
+  previous head until the `.json` arrives (`incomplete`, never used).
 - Users: `/etc/laya/users.conf` (root:laya 0640), one line per Dovecot username with `active` or `off`
   (any other word, e.g. an old `shadow`, is logged and ignored = `off`); `* <mode>` sets the default. Users not listed (and no `*`) are `off`. Reread when it changes.
 
@@ -259,7 +298,7 @@ With `--archive /var/lib/laya/emb`, laya-serve appends one line per classified m
 768 float16 values}` (about 2 KB per mail). Decision, changed from version 1: the embedding stays in the same
 line instead of a monthly `.npy` with a row index. One append per mail is atomic, and there is no second file to
 keep in step. Same key (`mid_hash`), dtype and fingerprint as the training cache (TRAINING-LAYA §5).
-**To write:** the reader in `laya-embed.py` (Monday run, §6). Until then the training cache recomputes what's
+Testable with `--stub --archive DIR` (test run D1c, unit test `test_delivery_archive`). **To write:** the reader in `laya-embed.py` (Monday run, §6). Until then the training cache recomputes what's
 missing. Not needed for activation.
 
 ### 2.6 systemd unit
@@ -304,7 +343,7 @@ WantedBy=multi-user.target
 `ProtectHome=yes`: laya-serve never reads the training files in a home; heads come from `/laya/heads` only.
 Not tested under systemd on the test environment (containers). Check `systemd-analyze verify` on the mail server.
 
-### 2.7 Code and test-environment run (version 2)
+### 2.7 Code and test-environment run (version 3)
 
 Package `laya/` (not published yet):
 
@@ -312,27 +351,53 @@ Package `laya/` (not published yet):
 |---|---|
 | `laya-serve.py` | `/opt/laya/serve/laya-serve.py`; `--stub` = the fake encoder of `laya-embed.py --encoder fake-hash`, for tests only |
 | `laya-filter` | `/usr/local/lib/dovecot/sieve-filter/laya-filter`, root 0755 |
+| `laya_head.py` | `/opt/laya/training/laya_head.py`: head format `laya-head-v2` + strict loader, shared by training, check-head and serve |
 | `laya-check-head.py` | `/opt/laya/training/laya-check-head.py` (§3.2, `--install`) |
+| `laya-rollback.sh` | `/opt/laya/training/laya-rollback.sh` (§10) |
 | `sieve/laya.sieve`, `dovecot/90-laya.conf` | §1.2 |
 | `etc/users.conf.example`, `etc/filter.conf.example` | `/etc/laya/` |
 | `systemd/laya-serve.service` | §2.6 |
-| `tests/test_laya.py` | 23 unit/integration tests (filter against a fake server; serve `--stub`; check-head) |
+| `tests/test_laya.py` | 34 unit/integration tests (filter against a fake server; serve `--stub`; check-head incl. 22 broken heads and the pickle test; rollback) |
 | test environment | not published: `deploy.sh`, `make-heads.sh`, `verify.py`, Pigeonhole probes |
 
 Requirements: laya-filter = Python ≥ 3.9 stdlib only. laya-serve and laya-check-head = Python ≥ 3.9 + `numpy`
-+ `joblib`; the real encoder also `sentence-transformers` + `torch` (CPU). All from `/opt/laya/venv`
+(**no joblib**); the real encoder also `sentence-transformers` + `torch` (CPU). All from `/opt/laya/venv`
 (`requirements.lock`).
 
-Test run, 5 Oct 2026 08:08. Separate test containers with Dovecot 2.4.2, the users' real Sieve scripts copied
-from the Smistamento test instance, classes exported with `smistamento-server.py classes`, fake-encoder heads.
-**23/23 PASS**:
+Test run (version 3), 5 Oct 2026 08:40. Separate test containers with Dovecot 2.4.2, the users' real Sieve scripts
+copied from the Smistamento test instance, classes exported with `smistamento-server.py classes`, fake-encoder
+heads; the test config defines bazaar **before** laya on purpose. **33/33 PASS**:
 
-- C1a: 12 broken heads rejected.
-- C1b: 11/11 OK and installed for both users.
-- C2: re-install keeps `.prev` with its old date.
-- D1–D9: classification and filing; forged headers stripped; spam flag; Junk → Trash; user filter wins;
-  local, spoofed-local and pickup mail; two recipients; user off.
-- F1–F8: laya-serve down, hanging, crashing; laya-filter failing or hanging; hard limit; recovery; 0-byte head.
+- C1a: 18 broken heads rejected (format, not a dict, sha mismatch, pickle, object array, extra member, shape, NaN,
+  order, junk, path, encoder, preproc, user, gate, < 200, report lies, 0 bytes); nothing installed.
+- C1p: pickle-bearing candidates refused by check-head **run as root** and never executed (control: the same
+  file through `pickle.load` does run the payload).
+- C1c: candidate in a world-writable directory → FAIL 11.
+- C1b: 11/11 OK and installed for both users (first install, from `/var/lib/laya/candidates`).
+- C2: re-install keeps the `.prev` pair with its old date; archive names `YYYYMMDD-HHMMSS`.
+- C1g: worse candidate whose report says `val_error_old: null` while a head is in use → FAIL 10 (old error
+  recomputed on the held-out set), head in use untouched.
+- C3: `laya-rollback.sh`: previous pair back with its old mtime, no `.prev`/`*.bad.*` left, refused pair in
+  `heads-archive/<address>/bad-*`.
+- C4: owners and modes as in §3.3.
+- D1–D9: classification and filing; delivery archive line (D1c); forged headers stripped; spam flag; malware flag
+  + forged headers → Junk without `X-Laya-*` (D3b, QA A3); Junk → Trash; user filter wins; local, spoofed-local and
+  pickup mail; two recipients; user off.
+- F1–F11: laya-serve down, hanging, crashing; laya-filter failing or hanging; hard limit; stale request after a
+  pause skipped quietly (F9); short body rejected in < 1 s, not classified (F10); 12 parallel deliveries while
+  laya-serve hangs, no `BlockingIOError` (F11); recovery; 0-byte head.
+
+**QA fixes in version 3** (QA of version 2):
+
+| QA | Problem | Fix |
+|---|---|---|
+| A3 | bazaar's `fileinto Junk; stop` ended the chain before `laya`: malware mail in Junk **with** forged `X-Laya-*` | `laya` first via `precedence = 1` (§1.2, decision there); test D3b |
+| C1 (security) | heads were joblib = pickle: a malicious candidate ran code as root in `laya-check-head.py` (sudo) and as `laya` in laya-serve | data-only format `laya-head-v2` (§3.2), strict loader, checked bytes installed, candidates in a root-only directory; test C1p, unit tests `test_pickle_bearing_files_are_refused_and_never_executed` and `test_pickle_head_refused_never_executed` |
+| C1 (gate) | report with `val_error_old: null` passed although a head was in use | check-head recomputes both errors on the held-out set; null only for a first install (§3.2 check 10); test C1g |
+| 4 | after a pause, requests whose client had given up were processed (BrokenPipe traceback, skewed `ms`) | `deadline` + closed-peer detection, quiet skip (§2.2); test F9 |
+| 5 | announced size > body: 3 s wait, partial body classified | exact read, half-close, `bad_request` (§2.2); test F10 |
+| 6 | Received pattern matched words anywhere; backlog 5; install times in UTC | clause parser (§1.5); backlog 64 + busy retry (§2.2); install/report times local with offset; test F11 |
+| spec | `users.conf`, `filter.conf`, Sieve scripts owned by vmail in the test env; rollback not deployed; archive naming; archive untestable | test env as §3.3 (C4); `laya-rollback.sh` deployed and tested (C3); naming decided `YYYYMMDD-HHMMSS` (§3.3); `--stub --archive` (D1c) |
 
 ---
 
@@ -345,8 +410,11 @@ history and each user's classes file (exported on the mail server, §4). Then, i
 the mail server**:
 
 ```
-~/laya/work/<address>.joblib(.new)    the head (the guide writes <address>.joblib.new)
+~/laya/work/<address>.npz.new         the candidate head, weights (laya-head-v2, §3.2; written by laya-train.py)
+~/laya/work/<address>.json.new        the candidate head, metadata (names the .npz by sha256)
 ~/laya/work/<address>.report.json     its training report (check 10)
+~/laya/work/<address>.val.npz         the held-out validation set (embeddings + true labels, no text): check 10
+                                      recomputes the errors of the candidate and of the head in use on it
 ~/laya/classes/<address>.json         the classes export the head was trained on (for reference; check 3
                                       compares against TODAY's /var/lib/smistamento/classes/<address>.json)
 ```
@@ -355,7 +423,7 @@ On the mail server, outside the home, installed once (not per user):
 
 ```
 /opt/laya/encoder/laya-multilingual/  the SAME encoder files as on the training PC (§3.4) + laya-multilingual.sha256
-/opt/laya/requirements.lock           exact Python package versions (same as the training PC for encoder + numpy/joblib)
+/opt/laya/requirements.lock           exact Python package versions (same as the training PC for encoder + numpy; no joblib)
 ```
 
 The weekly incremental run is on **the mail server** (§6) and never copies anything back to the training PC. The embedding
@@ -366,7 +434,7 @@ needs the history's embeddings: the owner copies it once (Decision 6, §3.5).
 
 | # | Check | Why (what the code expects) |
 |---|---|---|
-| 1 | `joblib.load` gives a `dict` with `format == "laya-head-v1"` | format of TRAINING-LAYA §8; `laya-install.sh` refuses other formats |
+| 1 | the pair parses with the **strict loader** of `laya_head.py`: `<address>.json` strict JSON object with `format == "laya-head-v2"`; `<address>.npz` a zip with exactly `W.npy` and `b.npy`, loaded with `np.load(allow_pickle=False)`; sha256 of the `.npz` bytes == `weights_sha256` | **version 3 (QA C1, security)**: the old joblib heads were pickle, and loading a pickle runs code. Nothing is ever unpickled now; an old `.joblib` or any pickle-bearing file (raw pickle, object array, extra member) is refused. See «Format» below |
 | 2 | `W` float32 shape `(768, N)`, `b` shape `(N,)`, `temperature` float > 0 | SPEC-LAYA: linear `768 → N` |
 | 3 | `labels` == the `label` fields of **today's** `/var/lib/smistamento/classes/<address>.json`, same order, same spelling | SPEC-LAYA: «Classi: quelle del suo file `classes`, nello stesso ordine». A renamed or switched-off folder means retraining (or accept that those mails stay in INBOX, SPEC-LAYA «Casi») |
 | 4 | `labels[0]` = the inbox label (`Imbox`, `smistamento_inbox_labels`) | the plugin `stop`s on that label: people's mail never moves |
@@ -374,13 +442,25 @@ needs the history's embeddings: the owner copies it once (Decision 6, §3.5).
 | 6 | labels are the `label` field, not `path` or `mailbox` (e.g. `PaperTrail`, not `Paper Trail`) | `lib/smistamento_labels.php` matches the Sieve `accepts` list (case-insensitive) |
 | 7 | `encoder` == the fingerprint of the deployed encoder (`laya-multilingual@sha256:<16 hex>`, computed as in `laya-embed.py::encoder_id`) | a head is meaningless on another encoder; `laya-serve` refuses a mismatch (`reason: encoder_mismatch`) |
 | 8 | `preproc` == `laya_text.PREPROC_VERSION` of the deployed `laya_text.py` (`laya-text-v1`) | train and inference text must be identical |
-| 9 | `user` == the address in the file name == the Dovecot username (full address) | `smistamento_head_file = '/laya/heads/%u.joblib'`; in a test setup it may be a short name (`user`), in production `user@example.org` |
-| 10 | `report.json`: `exit == 0`, `n_train + n_val ≥ 200`; read `muted`, `per_class`, `confusion`, `val_error_*` | SPEC-LAYA minimum of 200; accept rule «not worse than the head in use» |
-| 11 | file non-empty (a **0-byte placeholder** file is not a head) | `laya-serve` treats 0 bytes as «no head» |
+| 9 | `user` == the address in the file name == the Dovecot username (full address) | `smistamento_head_file = '/laya/heads/%u.json'`; in a test setup it may be a short name (`user`), in production `user@example.org` |
+| 10 | `report.json`: `exit == 0`, `n_train + n_val ≥ 200`; the validation gate, **recomputed** on `<address>.val.npz` (below) | SPEC-LAYA minimum of 200; accept rule «not worse than the head in use», which can no longer be skipped (QA version 2) |
+| 11 | files non-empty, regular files (no symlinks), within size limits; run as root, each file **and its directory** owned by root and not group/other-writable | `laya-serve` treats a 0-byte `.json` as «no head» (a 0-byte placeholder file, e.g. for the plugin date in a test setup, is not a head). Root-only location = defence in depth: nobody else can swap a file between check and install |
 
-Check script: `laya/laya-check-head.py` (Python + numpy + joblib), written and tested in a test environment (§2.7, C1a/C1b/C2). It
-runs 1–11 and prints one `OK`/`FAIL` line per check. Exit 0 = OK; 1 = a check failed, nothing installed;
-2 = usage or I/O error. Details as implemented:
+**Format `laya-head-v2`** (`laya_head.py`, Decision version 3; a format that cannot carry code):
+
+| File | Content |
+|---|---|
+| `<address>.npz` | plain zip, exactly two members `W.npy` (float32 little-endian, `(768, N)`) and `b.npy` (float32, `(N,)`); ≤ 4 MB. Loaded from bytes in memory with `allow_pickle=False` |
+| `<address>.json` | `format`, `user`, `labels` (N), `n_labels`, `dim` (768), `temperature`, `encoder` (fingerprint), `preproc` (text version), `weights_sha256` (of the `.npz`), `trained_at` (ISO 8601, local time with offset), `classes_exported_at`, `n_train`, `n_val`, `muted`, `C`, `val_error`, `val_error_majority`. Strict JSON: no NaN/Infinity, no duplicate keys, ≤ 256 KB |
+| `<address>.val.npz` (candidate only) | held-out set: `X` float32 `(n, 768)`, `y` label names, `mid_hash`, `meta` (JSON: user, encoder, preproc, n). Also `allow_pickle=False` |
+
+The `.json` is the **commit file**: it is renamed last, names the exact `.npz` bytes, and its mtime is the plugin's
+«Smistamento aggiornato» date (`smistamento_head_file = '/laya/heads/%u.json'`).
+
+Check script: `laya/laya-check-head.py` (Python + numpy, no joblib), written and tested in a test environment (§2.7, C1a/C1p/C1c/C1b/C2/C1g).
+It runs 1–11 and prints one `OK`/`FAIL` line per check. Exit 0 = OK; 1 = a check failed, nothing installed;
+2 = usage or I/O error. Each file is read **once** into memory; the bytes that passed the checks are the bytes it
+installs. Details as implemented:
 
 - 2 also requires every value of `W`/`b` and `temperature` to be finite, and the labels to be ≥ 2 distinct
   non-empty strings.
@@ -391,12 +471,20 @@ runs 1–11 and prints one `OK`/`FAIL` line per check. Exit 0 = OK; 1 = a check 
   - `exit == 0`;
   - `n_train + n_val ≥ 200`;
   - the report belongs to this head (same user, labels, encoder, `n_train`/`n_val`);
+  - with the held-out set (`--val`, default `<address>.val.npz` next to the candidate; same user/encoder/preproc,
+    `n == n_val`): check-head **computes** `val_error_new` itself (the report's value must agree within 1/n) and,
+    when a head is in use, `val_error_old` = the error of the head in use on the same set. The report's
+    `val_error_old` is not trusted;
   - `val_error_new < val_error_majority`;
-  - `val_error_new ≤ val_error_old` when there was a head in use.
-- With `--install` it replaces `laya-install.sh`. It copies to a temp file in the heads directory, then
-  chmod 0644, fsync, mtime = now. It copies the head in use to `.prev` (temp + rename, keeping its date) and
-  renames over `<address>.joblib`. Finally it copies head + report into `heads-archive/<address>/` (0600,
-  keeps 8).
+  - when a head is in use: `val_error_old` is **required** and `val_error_new ≤ val_error_old`. Without a held-out
+    set the report's value is used, and `null` → FAIL. `null`/no comparison is accepted only for a **first
+    install** (no `.json` in use), or when the head in use is one laya-serve itself refuses (other encoder,
+    broken file): that counts as a first install and is printed.
+- With `--install` (it replaces the old `laya-install.sh`, which is now a thin wrapper): writes the checked bytes to
+  temp files in the heads directory (0644, fsync, mtime = now), copies the pair in use to `<address>.npz.prev` /
+  `<address>.json.prev` (keeping their dates), renames the `.npz`, then the `.json` (commit). Finally it copies
+  `.npz`, `.json` and report into `heads-archive/<address>/YYYYMMDD-HHMMSS.{npz,json,report.json}` (0600, keeps 8;
+  `-2`, `-3` … if two installs fall in the same second). It prints the install time in local time with offset.
 
 ### 3.3 Destination (Decision, paths from SPEC-LAYA / README)
 
@@ -405,28 +493,35 @@ runs 1–11 and prints one `OK`/`FAIL` line per check. Exit 0 = OK; 1 = a check 
 | `/opt/laya/encoder/laya-multilingual/` | root, 0755 / files 0644, read-only | encoder + `.sha256`; never updated in place |
 | `/opt/laya/venv/` | root | from `requirements.lock` |
 | `/opt/laya/training/` | root | `laya_text.py`, `laya_head.py`, `laya-export.py`, `laya-embed.py`, `laya-train.py`, `laya-install.sh`, `laya-rollback.sh`, `laya-monday.sh` |
-| `/opt/laya/training/laya-check-head.py` | root | §3.2 (from `laya/`) |
-| `/opt/laya/serve/` | root | `laya-serve.py`, imports `laya_text` from `/opt/laya/training` |
-| `/etc/laya/filter.conf` | root 0644 | laya-filter: socket, timeout, `local_domains`, `mta_hosts` (§1.5) |
+| `/opt/laya/training/laya-check-head.py`, `laya-rollback.sh` | root 0755 | §3.2, §10 (from `laya/`; `laya_head.py` too, 0644) |
+| `/opt/laya/serve/` | root | `laya-serve.py`, imports `laya_text` and `laya_head` from `/opt/laya/training` |
+| `/etc/laya/filter.conf` | root:root 0644 (directory root 0755) | laya-filter: socket, timeout, `local_domains`, `mta_hosts` (§1.5). **Not** owned by vmail: the mail user must not be able to change what laya-filter trusts |
+| `/etc/dovecot/sieve/laya.sieve` (+ `.svbin`), the bazaar script | root:root 0644 (directory root 0755) | global before-scripts; not owned by vmail |
 | `/usr/local/lib/dovecot/sieve-filter/laya-filter` | root, 0755 | the only file in that directory |
-| `/laya/heads/<address>.joblib` | root:root 0644, directory 0755 | the head in use (mtime = «Smistamento aggiornato») |
-| `/laya/heads/<address>.joblib.prev` | same | previous head (SPEC-LAYA rollback) |
-| `/var/lib/laya/heads-archive/<address>/<YYYYMMDD-HHMM>.{joblib,report.json}` | root 0600 / dir 0700 | every installed head + its report; keep 8 (Decision) |
-| `/var/lib/laya/{train,emb-cache,emb}` | 0700 (train, emb-cache: root; emb: laya) | training work, embedding cache, delivery archive |
-| `/etc/laya/users.conf` | root:laya 0640 | `active` / `off` per address |
+| `/laya/heads/<address>.json` + `<address>.npz` | root:root 0644, directory root 0755 | the head in use; the `.json` mtime = «Smistamento aggiornato» |
+| `/laya/heads/<address>.json.prev` + `.npz.prev` | same | previous head (SPEC-LAYA rollback); gone after a rollback |
+| `/var/lib/laya/candidates/` | root 0700, files root 0600 | candidates copied here before the install (check 11 refuses other places when run as root) |
+| `/var/lib/laya/heads-archive/<address>/YYYYMMDD-HHMMSS.{npz,json,report.json}` | root 0600 / dir 0700 | every installed head + its report; keep 8 (Decision). **Naming decided in version 3: `YYYYMMDD-HHMMSS`** (seconds, not `HHMM`: two installs in the same minute, e.g. a re-install after a fix, must not collide). Rolled-back heads: `bad-YYYYMMDD-HHMMSS.{npz,json}` (§10) |
+| `/var/lib/laya/{train,emb-cache,emb}` | 0700 (train, emb-cache: root; emb: laya) | training work (the Monday candidates), embedding cache, delivery archive (§2.5, files 0600) |
+| `/etc/laya/users.conf` | root:laya 0640 | `active` / `off` per address (laya-serve reads it through its group; vmail cannot) |
 
-Install, per user (checks 1–11, then atomic, `.prev`, mtime = now: TRAINING-LAYA §9), one command:
+Install, per user (checks 1–11, then atomic, `.prev` pair, mtime = now): copy the candidate into the root-only
+directory, then one command:
 
 ```bash
 U=user@example.org
+sudo install -d -m 0700 -o root -g root /var/lib/laya/candidates
+sudo install -m 0600 -o root -g root ~installer/laya/work/$U.npz.new ~installer/laya/work/$U.json.new \
+     ~installer/laya/work/$U.report.json ~installer/laya/work/$U.val.npz /var/lib/laya/candidates/
 sudo /opt/laya/venv/bin/python /opt/laya/training/laya-check-head.py --user $U \
-     --head ~installer/laya/work/$U.joblib.new --classes /var/lib/smistamento/classes/$U.json \
+     --head /var/lib/laya/candidates/$U.npz.new --classes /var/lib/smistamento/classes/$U.json \
      --encoder /opt/laya/encoder/laya-multilingual --doveadm doveadm \
      --install --heads-dir /laya/heads --archive-dir /var/lib/laya/heads-archive
+sudo rm -f /var/lib/laya/candidates/$U.*
 ```
 
-Run `smistamento-server.py classes --user $U` first (§4). Rollback stays `laya-rollback.sh`. Afterwards the
-training files in the home can go (`shred -u ~/laya/work/*.jsonl`). The embedding cache goes to
+Run `smistamento-server.py classes --user $U` first (§4). Rollback: `laya-rollback.sh` (§10). Afterwards the
+training files in the home can go (`shred -u ~/laya/work/*.jsonl ~/laya/work/*.val.npz`). The embedding cache goes to
 `/var/lib/laya/emb-cache` as in §3.5.
 
 Roundcube container: mount the **directory** read-only (`- /laya/heads:/laya/heads:ro`), never the single
@@ -521,7 +616,8 @@ Follow `INSTALL-AGENT.md` and README «Installazione», «Server». In short:
    cert is snakeoil (the mail-server spec).
 3. `smistamento_min_conf = '0.80'`, `smistamento_inbox_labels = ['Imbox']`, `smistamento_spam_labels = ['Junk']`,
    `smistamento_spam_default = ['active' => true, 'threshold' => '0.40', 'trash_threshold' => '0.80', 'action' => 'trash']`,
-   `smistamento_label_map` only where the auto mapping isn't enough, `smistamento_head_file = '/laya/heads/%u.joblib'`.
+   `smistamento_label_map` only where the auto mapping isn't enough, `smistamento_head_file = '/laya/heads/%u.json'`
+   (version 3: the `.json` of the head pair; was `%u.joblib`).
 4. Dovecot 2.4: `protocols = imap lmtp sieve`; ManageSieve on `127.0.0.1:4190` only (never public);
    `protocol lmtp { mail_plugins { sieve = yes } }`; `sieve_script personal` (`~/sieve`, `~/.dovecot.sieve`);
    `sieve_script smistamento { type = after; driver = file; path = ~/sieve/smistamento.sieve }`; the bazaar
@@ -567,8 +663,10 @@ On **the mail server** (Decision 1: the Monday incremental training; the first t
 `laya-monday.sh` (TRAINING-LAYA §10): per user, `laya-export.py` → `laya-embed.py` (CPU,
 `--device cpu`) → `laya-train.py` → install only on exit 0 (new validation error not worse than the head in
 use). On top of the guide (Decision), the install step is `laya-check-head.py --install` instead of
-`laya-install.sh`: checks 1–11, then the atomic install with `.prev` and the copy into `heads-archive`.
-**To do (implementer):** change that one line in `laya-monday.sh`. `laya-serve` picks up the new head through the mtime. Log: `/var/log/laya/monday.log`
+`laya-install.sh`: checks 1–11 (gate recomputed on `$WORK/<address>.val.npz`), then the atomic install with the
+`.prev` pair and the copy into `heads-archive`. **Done (version 3):** `laya-monday.sh` calls check-head directly
+(candidates in `/var/lib/laya/train`, root 0700) and deletes `<address>.jsonl` and `<address>.val.npz` after each
+user. `laya-serve` picks up the new head through the mtime. Log: `/var/log/laya/monday.log`
 (logrotate weekly).
 
 ---
@@ -610,7 +708,7 @@ Delivery and fallback (A):
 - [ ] A1 `systemctl stop laya-serve` → new mail delivered **at once** (no wait), **no** `X-Laya-*` headers, in INBOX; Dovecot log has `laya-filter: user=… fallback … (FileNotFoundError|ConnectionRefusedError)`; restart → headers again
 - [ ] A1b laya-serve hanging (`systemctl kill -s STOP laya-serve`, then `-s CONT`) → delivered after ~5 s, no headers, INBOX, log `TimeoutError`; never 10 s (§1.3)
 - [ ] A2 incoming mail **with** forged `X-Laya-Box: Junk` + `X-Laya-Box-Conf: 0.99` (and any other `X-Laya-Whatever`, also folded or lower-case): stored without them; with Laya up it gets the real label only; with Laya down it stays in INBOX; with «Elimina definitivamente» it is **not** discarded
-- [ ] A3 `X-Spam-Flag: YES` / `X-Malware-Bazaar: hit` → no Laya headers (forged ones stripped too), laya-serve not asked, never sorted
+- [ ] A3 `X-Spam-Flag: YES` / `X-Malware-Bazaar: hit` → no Laya headers (forged ones stripped too), laya-serve not asked, never sorted. **With** forged `X-Laya-Box`/`-Conf`: a malware hit lands in Junk (bazaar wins) **without** any `X-Laya-*` (laya runs first, §1.2)
 - [ ] A4 user with no head (or the 0-byte placeholder) → no headers; plugin «Smistamento di base…»
 - [ ] A5 one mail to two local users → each gets the label of **their** head (or none)
 - [ ] A6 user `off` (not in `users.conf`) with a head: no header, INBOX, laya-serve answers `off`
@@ -631,9 +729,12 @@ Active user (B):
 Files and ops (C):
 
 - [ ] C1 `laya-check-head.py` OK for every installed user; `labels` = today's `classes` file; a broken head (wrong label order, NaN, wrong encoder, report exit 2, 0 bytes) → `FAIL`, exit 1, head in use untouched
+- [ ] C1p a pickle-bearing candidate (old `.joblib`, raw pickle renamed `.npz`, npz with an object array or an extra member) run through check-head **as root** → `FAIL`, payload never executed; the same as a head in `/laya/heads` → laya-serve `bad_head`, payload never executed
+- [ ] C1g with a head in use, a worse candidate whose report says `val_error_old: null` → `FAIL 10`; a candidate outside a root-only directory → `FAIL 11`
 - [ ] C2 install → plugin shows «Smistamento aggiornato <today>» without restarting anything; `laya-serve` uses the new head (log)
-- [ ] C3 `laya-rollback.sh` → old head back, plugin shows the old date, `laya-serve` reloads
-- [ ] C4 permissions as in §3.3; `/run/laya/laya.sock` 0660 laya:vmail; 4190 not public
+- [ ] C3 `laya-rollback.sh` → old head back, plugin shows the old date, `laya-serve` reloads; no `.prev` and no `*.bad.*` left in `/laya/heads`; refused pair in `heads-archive/<address>/bad-*`
+- [ ] C4 permissions as in §3.3 (`users.conf` root:laya 0640; `filter.conf` and the global Sieve scripts root 0644; candidates/heads-archive root 0700); `/run/laya/laya.sock` 0660 laya:vmail; 4190 not public
+- [ ] C7 laya-serve paused past 5 s then resumed (`systemctl kill -s STOP`/`CONT`) → no traceback, `skipped, the client already gave up` per stale request; a request announcing more bytes than it sends → `bad_request` at once, not classified
 - [ ] C5 03:00 classes files fresh on Monday; 03:30 log has one line per user (phase 2)
 - [ ] C6 digest: summary off by default; with a valid key «In breve» appears; with an invalid key or the mock down, the digest arrives without summary and the log has no key and no mail text
 
@@ -643,7 +744,7 @@ Files and ops (C):
 
 | Level | Command | Effect |
 |---|---|---|
-| One user's head | `sudo /opt/laya/training/laya-rollback.sh <address> /laya/heads` | previous head (`.prev`) back with its mtime; older ones in `heads-archive` |
+| One user's head | `sudo /opt/laya/training/laya-rollback.sh <address> /laya/heads /var/lib/laya/heads-archive` | previous pair (`.npz.prev` then `.json.prev`) back with its mtime (= old plugin date); the refused pair → `heads-archive/<address>/bad-YYYYMMDD-HHMMSS.{npz,json}` (deleted if no archive dir), never left in `/laya/heads`; old `<address>.*.bad.*` leftovers removed; afterwards no `.prev`, older heads only from `heads-archive` (copy the pair to `/var/lib/laya/candidates` and install it with check-head) |
 | One user's sorting | set `off` in `/etc/laya/users.conf` | no more moves for them; already-moved mail stays where it is (SPEC-SMISTAMENTO rule 7) |
 | Laya globally | `systemctl stop laya-serve` | every mail delivered without headers → INBOX (fallback §1.3) |
 | Remove Laya from delivery | remove the `sieve_script laya` block, `doveadm reload` | Sieve as before Laya; the forged-header stripping goes too (only safe if the after-script is also off, or nobody uses «Elimina») |
@@ -659,7 +760,7 @@ Files and ops (C):
 4. **Conf format**: two decimals, dot, compared as strings (`i;octet`). `.93` and `0,93` sort *below* `"0.80"` and never pass; `0.9` or `1` pass only by luck. Always `"%.2f"`, `0.00`–`1.00`.
 5. **Usernames**: `%u` / `USER` is the full address on the mail server but may be a short name in a test setup. The head file name must follow the environment.
 6. **Classes drift**: a head trained on an older `classes` (renamed or switched-off folder, spam switch changed) still loads, but those labels never move mail. Check 3 catches it.
-7. **Placeholder heads**: a 0-byte `/laya/heads/<user>.joblib` (e.g. in a test setup, only for the date line) is not a head.
+7. **Placeholder heads**: a 0-byte `/laya/heads/<user>.json` (e.g. in a test setup, only for the date line) is not a head. laya-serve never loads an old `.joblib` file.
 8. **«Submission 465/587 non ci passano»** (SPEC-LAYA): resolved by Decision 3. Mail between local users is **not** classified; laya-filter recognises it as in §1.5. Mail to external recipients never reaches LMTP anyway. Watch out: if Postfix on the mail server is configured so that the entry `Received` line no longer says `ESMTPSA`/`ESMTPA` (e.g. a submission proxy in front), local mail gets classified. Harmless, but against the decision: adjust `mta_hosts`/markers.
 9. **SPEC-LAYA chain** says «Dovecot scrive la Maildir in INBOX, Laya legge, scrive gli header, Sieve sposta». Here Laya acts during LMTP, before the write. Same effect, one write.
 
@@ -667,12 +768,14 @@ Files and ops (C):
 
 ## 12. Open points
 
-Status after version 2 (5 Oct 2026):
+Status after version 3 (5 Oct 2026):
 
 1. ~~**Where training runs**~~ **Decided** (§0.1): first training on the training PC, Monday incremental training on the mail server.
 2. **Encoder**: approved (§0.2). **Owner:** fill in model, revision and fingerprint in §3.4 before phase 1.
 3. ~~**Laya inference code doesn't exist**~~ **Written** (`laya/`, §2.7) and tested on the test environment with the fake encoder.
    Still untested: the real encoder in laya-serve (`RealEncoder`), and the systemd unit on a real host.
+   Version 3 fixes the QA findings (§2.7 «QA fixes»), among them a **security** fix: heads were pickle (joblib) and a
+   malicious candidate could run code as root; now data only (§3.2).
 4. **Mail server capacity**: the VPS RAM/CPU vs the encoder resident in memory plus Roundcube; latency under load. Unmeasured.
 5. ~~**Before cutover**~~ **Decided** (§0.5): no shadow phase; Laya goes active on real mail after the MX cutover, no copy of incoming mail.
 6. ~~**Local-to-local submission**~~ **Decided** (§0.3): not classified; definition and detection in §1.5.

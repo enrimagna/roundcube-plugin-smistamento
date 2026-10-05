@@ -23,7 +23,7 @@ Un encoder condiviso, una testa per utente.
 | Pezzo | Cosa è |
 |---|---|
 | Encoder | `laya-multilingual`, congelato, un processo sul server di posta |
-| Testa | lineare `768 → N`, una per utente, file `/laya/heads/<indirizzo>.joblib` |
+| Testa | lineare `768 → N`, una per utente, coppia di file `/laya/heads/<indirizzo>.npz` (pesi) + `/laya/heads/<indirizzo>.json` (metadati); solo dati, niente pickle (formato `laya-head-v2`, SPEC-INSTALL-LAYA §3.2) |
 | N | numero di classi dell'utente, variabile |
 | Classi | quelle del suo file `classes`, nello stesso ordine |
 | Nel file | `W`, `b`, temperature, ordine delle etichette |
@@ -87,7 +87,7 @@ Se a una mail manca l'embedding (Laya era giù, archivio perso), al training si 
    - in una cartella non attiva, o che non è nel file `classes`: esclusa.
 4. Si riallena la testa **da zero**, `768 → N` con le classi del file, nel suo ordine, su tutto lo storico più le correzioni nuove (non solo l'ultima settimana). L'encoder no.
 5. Controllo prima di installare: una parte degli esempi resta fuori come validazione. La testa nuova si installa solo se il suo errore su quella parte non è peggiore di quello della testa in uso. Altrimenti resta la vecchia e si scrive nel log.
-6. Installazione atomica: scrittura in un file temporaneo, poi rename su `/laya/heads/<indirizzo>.joblib`. La testa precedente resta come `<indirizzo>.joblib.prev`, per il rollback. L'mtime del file è la data «Smistamento aggiornato» nel plugin.
+6. Installazione atomica: scrittura in file temporanei, poi rename su `/laya/heads/<indirizzo>.npz` e per ultimo su `/laya/heads/<indirizzo>.json`. La testa precedente resta come coppia `<indirizzo>.npz.prev` + `<indirizzo>.json.prev`, per il rollback. L'mtime del `.json` è la data «Smistamento aggiornato» nel plugin. Le teste non sono mai pickle/joblib: si caricano solo come dati (`allow_pickle=False`, JSON stretto), così un file malevolo non può eseguire codice.
 
 ### Costi
 

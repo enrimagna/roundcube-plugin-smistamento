@@ -53,7 +53,7 @@ Ricavali dal server (passo 1) e scrivili nel rapporto. Se uno non si ricava con 
 | `<rc-plugins-in-container>` | cartella plugin dentro il container (immagine ufficiale: `/var/www/html/plugins`) | `exec ... ls` |
 | `<container-host-ip>` | indirizzo con cui il container raggiunge Dovecot sull'host | **lo stesso host già usato da `$config['imap_host']`** (con slirp4netns spesso `10.0.2.2`) |
 | `<webmail-url>` | URL pubblico della webmail, con `/` finale | config / reverse proxy |
-| `<laya-heads-dir>` | cartella sull'host per i file `.joblib` di Laya (default `/laya/heads`) | chiedi all'umano se non esiste |
+| `<laya-heads-dir>` | cartella sull'host per i file delle teste di Laya, coppie `<indirizzo>.json` + `<indirizzo>.npz` (default `/laya/heads`) | chiedi all'umano se non esiste |
 | `<test-user>` | casella di prova autorizzata dall'umano per il test di consegna | **chiedi all'umano** |
 | `<www-data-uid>` / `<www-data-gid>` | uid/gid **sull'host** che corrispondono a `www-data` (33/33) del container | rootless: inizio del range in `/etc/subuid` / `/etc/subgid` dell'utente del container + 32 (es. `100000:65536` → `100032`); verifica al passo 4. Se il container usa un'altra mappatura (es. podman `--userns=keep-id`), chiedi |
 
@@ -208,7 +208,7 @@ $config['smistamento_managesieve_usetls'] = true;
 $config['smistamento_managesieve_conn_options'] = ['ssl' => ['verify_peer' => false, 'verify_peer_name' => false]];
 $config['smistamento_min_conf'] = '0.80';
 $config['smistamento_inbox_labels'] = ['Imbox'];                    // mail delle persone: restano in Posta in arrivo
-$config['smistamento_head_file'] = '/laya/heads/%u.joblib';         // %u = indirizzo completo; mount :ro
+$config['smistamento_head_file'] = '/laya/heads/%u.json';           // %u = indirizzo completo; mount :ro
 
 // Spam di Laya: etichette e default sono configurabili. Questi sono i default del plugin: scrivili
 // solo se l'umano vuole valori diversi.

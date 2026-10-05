@@ -53,7 +53,8 @@ ManageSieve. Dovecot lo esegue **dopo** i filtri dell'utente. Lo script fa `file
 - Una riga di aiuto: «Posta in arrivo: le mail delle persone e quelle di cui lo smistamento non è
   sicuro (o tutte, se è fermo).»
 - «Smistamento aggiornato sabato 3 ottobre» viene dalla data di modifica del file della testa
-  dell'utente (`smistamento_head_file`). Se il file manca, la riga dice «Smistamento di base: si
+  dell'utente (`smistamento_head_file`, di solito `/laya/heads/%u.json`: il `.json` della coppia
+  `.json` + `.npz` di Laya, che l'installazione scrive per ultimo). Se il file manca, la riga dice «Smistamento di base: si
   personalizza quando ci sono abbastanza mail». Se il percorso non è configurato, la riga non c'è.
 - **Lista cartelle**: il segno ↻ appare dopo le cartelle attive. Nel menu ⋮ di «Sezioni», la voce
   «Smistamento di questa cartella…» compare solo sulle cartelle attive e apre la riga evidenziata.
@@ -131,7 +132,7 @@ $config['smistamento_managesieve_host'] = '<container-host-ip>'; // come l'IMAP 
 $config['smistamento_managesieve_port'] = 4190;
 $config['smistamento_managesieve_usetls'] = true;
 $config['smistamento_managesieve_conn_options'] = ['ssl' => ['verify_peer' => false, 'verify_peer_name' => false]]; // finché il cert è snakeoil
-$config['smistamento_head_file'] = '/laya/heads/%u.joblib'; // + volume read-only in compose.yaml
+$config['smistamento_head_file'] = '/laya/heads/%u.json';   // + volume read-only in compose.yaml
 $config['smistamento_llm_dir'] = '/var/lib/smistamento/llm';   // «Riassunto con AI»: volume rw, stesso percorso
 $config['smistamento_llm_keyfile'] = '/etc/smistamento/llm.key'; // volume read-only (vedi «Riassunto con AI»)
 

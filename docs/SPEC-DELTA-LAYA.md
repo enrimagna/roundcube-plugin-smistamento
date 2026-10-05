@@ -11,7 +11,7 @@ Il resto di SPEC-SMISTAMENTO resta valido. Modello e training: SPEC-LAYA.
 2. Niente riga Imbox. In alto, la riga di aiuto: «Posta in arrivo: le mail delle persone e quelle di cui lo smistamento non è sicuro (o tutte, se è fermo).»
 3. Default per una cartella nuova: spenta, lette no, digest spento. Le impostazioni di partenza per Feed (lette no + giornaliero) e Paper Trail (lette sì + settimanale) restano un esempio, non una regola.
 4. Attiva spento = Sieve non smista in quella cartella e la mail resta in INBOX. Tooltip: «Spenta: queste mail restano in Posta in arrivo».
-5. Sotto l'intro, una riga: «Smistamento aggiornato <giorno g mese>», presa dall'mtime della testa dell'utente (`/laya/heads/<indirizzo>.joblib`, percorso configurabile). Senza testa: «Smistamento di base: si personalizza quando ci sono abbastanza mail».
+5. Sotto l'intro, una riga: «Smistamento aggiornato <giorno g mese>», presa dall'mtime della testa dell'utente (`/laya/heads/<indirizzo>.json`, il file della coppia `.json` + `.npz` scritto per ultimo; percorso configurabile). Senza testa: «Smistamento di base: si personalizza quando ci sono abbastanza mail».
 6. Intro: «Le mail nuove vanno da sole nelle cartelle attive. Se una finisce nel posto sbagliato, spostala: ogni settimana lo smistamento impara dai tuoi spostamenti.»
 7. «Smistata in Feed · Cambia»: Cambia apre il menu Sposta, con Posta in arrivo + le cartelle attive. Il segno ↻ e la voce nel menu ⋮ compaiono solo sulle cartelle attive.
 8. Il digest ha una sezione per ogni cartella attiva con quella periodicità. Mai Posta in arrivo, quindi mai le mail delle persone.
