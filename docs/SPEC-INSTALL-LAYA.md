@@ -298,8 +298,16 @@ With `--archive /var/lib/laya/emb`, laya-serve appends one line per classified m
 768 float16 values}` (about 2 KB per mail). Decision, changed from version 1: the embedding stays in the same
 line instead of a monthly `.npy` with a row index. One append per mail is atomic, and there is no second file to
 keep in step. Same key (`mid_hash`), dtype and fingerprint as the training cache (TRAINING-LAYA §5).
-Testable with `--stub --archive DIR` (test run D1c, unit test `test_delivery_archive`). **To write:** the reader in `laya-embed.py` (Monday run, §6). Until then the training cache recomputes what's
-missing. Not needed for activation.
+Testable with `--stub --archive DIR` (test run D1c, unit test `test_delivery_archive`). **Reader written** (5 Oct 2026) in `laya-embed.py` (`--archive-dir`, default `/var/lib/laya/emb`; the Monday
+run passes it, §6): before encoding, every valid line goes into the embedding cache, so delivered mail is never
+re-encoded and next week `laya-export.py` doesn't re-export its text. Each line is checked (JSON, 40-hex
+`mid_hash`, same encoder fingerprint and `preproc` as the cache, exactly 768 finite values, norm ≈ 1); other lines
+are counted and skipped (also a last line truncated by a concurrent write). The cache wins over the archive.
+Consumption without losing lines: `<address>.jsonl` is renamed to `<address>.jsonl.reading-<stamp>-<pid>`
+(laya-serve reopens the file for every line, so new deliveries go to a fresh `.jsonl`) and deleted only after the
+cache has been written; a leftover from an interrupted run is read again next time. `--keep-archive` = read only.
+Tested by `laya-training/tests/test_embed_archive.py` (10 tests, including lines written by the real
+`laya-serve.py --stub --archive`). Not needed for activation.
 
 ### 2.6 systemd unit
 
@@ -444,7 +452,7 @@ needs the history's embeddings: the owner copies it once (Decision 6, §3.5).
 | 8 | `preproc` == `laya_text.PREPROC_VERSION` of the deployed `laya_text.py` (`laya-text-v1`) | train and inference text must be identical |
 | 9 | `user` == the address in the file name == the Dovecot username (full address) | `smistamento_head_file = '/laya/heads/%u.json'`; in a test setup it may be a short name (`user`), in production `user@example.org` |
 | 10 | `report.json`: `exit == 0`, `n_train + n_val ≥ 200`; the validation gate, **recomputed** on `<address>.val.npz` (below) | SPEC-LAYA minimum of 200; accept rule «not worse than the head in use», which can no longer be skipped (QA version 2) |
-| 11 | files non-empty, regular files (no symlinks), within size limits; run as root, each file **and its directory** owned by root and not group/other-writable | `laya-serve` treats a 0-byte `.json` as «no head» (a 0-byte placeholder file, e.g. for the plugin date in a test setup, is not a head). Root-only location = defence in depth: nobody else can swap a file between check and install |
+| 11 | files non-empty, regular files (no symlinks), within size limits; run as root, each file **and its directory** owned by root and not group/other-writable | `laya-serve` treats a 0-byte `.json` as «no head» (a 0-byte placeholder file is not a head). Root-only location = defence in depth: nobody else can swap a file between check and install |
 
 **Format `laya-head-v2`** (`laya_head.py`, Decision version 3; a format that cannot carry code):
 
@@ -760,7 +768,7 @@ Files and ops (C):
 4. **Conf format**: two decimals, dot, compared as strings (`i;octet`). `.93` and `0,93` sort *below* `"0.80"` and never pass; `0.9` or `1` pass only by luck. Always `"%.2f"`, `0.00`–`1.00`.
 5. **Usernames**: `%u` / `USER` is the full address on the mail server but may be a short name in a test setup. The head file name must follow the environment.
 6. **Classes drift**: a head trained on an older `classes` (renamed or switched-off folder, spam switch changed) still loads, but those labels never move mail. Check 3 catches it.
-7. **Placeholder heads**: a 0-byte `/laya/heads/<user>.json` (e.g. in a test setup, only for the date line) is not a head. laya-serve never loads an old `.joblib` file.
+7. **Test heads**: a test setup can show the date line with a valid fake-encoder head pair (e.g. made with the package's test-head tool); a 0-byte `/laya/heads/<user>.json` is not a head. laya-serve never loads an old `.joblib` file.
 8. **«Submission 465/587 non ci passano»** (SPEC-LAYA): resolved by Decision 3. Mail between local users is **not** classified; laya-filter recognises it as in §1.5. Mail to external recipients never reaches LMTP anyway. Watch out: if Postfix on the mail server is configured so that the entry `Received` line no longer says `ESMTPSA`/`ESMTPA` (e.g. a submission proxy in front), local mail gets classified. Harmless, but against the decision: adjust `mta_hosts`/markers.
 9. **SPEC-LAYA chain** says «Dovecot scrive la Maildir in INBOX, Laya legge, scrive gli header, Sieve sposta». Here Laya acts during LMTP, before the write. Same effect, one write.
 
@@ -781,6 +789,6 @@ Status after version 3 (5 Oct 2026):
 6. ~~**Local-to-local submission**~~ **Decided** (§0.3): not classified; definition and detection in §1.5.
 7. ~~**Pigeonhole behaviour**~~ **Verified** on 2.4.2 (§1.4). New finding: Dovecot's own filter timeout panics LMTP, hence laya-filter's 5 s / 8 s limits.
 8. **Thresholds**: 0.80 / 0.40 / 0.80 are the plugin defaults. The owner watches the first weeks of active sorting (logs, «Smistata in», the digest) and adjusts; a calibration other than the head's single temperature is not planned.
-9. **Delivery archive**: format decided and implemented (§2.5, one jsonl line with the float16 embedding). The reader in `laya-embed.py` is still to write.
+9. ~~**Delivery archive**~~ **Done**: format decided and implemented (§2.5, one jsonl line with the float16 embedding); the reader in `laya-embed.py` is written and tested (5 Oct 2026).
 10. **Consent and privacy** for the other mailboxes (Laya reads content; training material in someone's home). SPEC-SMISTAMENTO §7 «Privacy» is still open.
 11. ~~**Embedding cache for the first Monday run**~~ **Decided** (§0.6): the owner copies the training PC's cache to the mail server once; step and check in §3.5.

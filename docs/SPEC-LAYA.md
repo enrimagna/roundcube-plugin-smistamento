@@ -97,7 +97,7 @@ Se a una mail manca l'embedding (Laya era giù, archivio perso), al training si 
 | RAM | qualche centinaio di MB, per poco |
 | Disco | 75–150 MB ogni 50.000 mail; meno di 0,5 MB a settimana per 100–150 spostamenti |
 
-**Da scrivere, lato Laya:** l'archivio di consegna (`Message-ID`, label proposto, confidenza, embedding), lo script del lunedì (raccolta etichette con `doveadm`, riallenamento, controllo sulla validazione, installazione atomica con `.prev`) e la riga di cron delle 03:30. Il plugin e `smistamento-server.py` non li fanno: danno solo il file `classes` delle 03:00.
+**Lato Laya, scritti (SPEC-INSTALL-LAYA §2, §3, §6):** l'archivio di consegna (`Message-ID`, label proposto, confidenza, embedding), lo script del lunedì (raccolta etichette con `doveadm`, riallenamento, controllo sulla validazione, installazione atomica con `.prev`) e la riga di cron delle 03:30. Il plugin e `smistamento-server.py` non li fanno: danno solo il file `classes` delle 03:00.
 
 ## Casi
 
